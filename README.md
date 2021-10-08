@@ -1,8 +1,6 @@
-# Winnie-AFL
+# WinFuzz-Winnie
 
-Winnie-AFL is a fork of WinAFL that supports fuzzing using a fork()-like API. For more details about Winnie, check out the [NDSS paper](https://www.ndss-symposium.org/ndss-paper/winnie-fuzzing-windows-applications-with-harness-synthesis-and-fast-cloning/).
-
-<img src="docs/rabbit.png" width="300px">
+Collaborative repo for WinFuzz ported atop of [Winnie](https://github.com/sslab-gatech/winnie).
 
 ## Project structure
 
