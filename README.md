@@ -1,6 +1,6 @@
 # WinFuzz-Winnie
 
-Collaborative repo for WinFuzz ported atop of [Winnie](https://github.com/sslab-gatech/winnie).
+Collaborative repo for [WinFuzz](https://github.com/FoRTE-Research/winfuzz-master) ported atop of [Winnie](https://github.com/sslab-gatech/winnie).
 
 ## Project structure
 
