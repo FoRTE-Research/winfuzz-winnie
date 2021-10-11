@@ -34,6 +34,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ipttool", "ipttool\ipttool.
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "libipt", "libipt\libipt.vcxproj", "{051DE316-C76C-4CFC-82DA-46C0B04CFAD8}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "injected-harness-winfuzz", "injected-harness-winfuzz\injected-harness-winfuzz.vcxproj", "{4065FBE0-4470-479A-AED6-7CD3D3D628C7}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Win32 = Debug|Win32
@@ -86,6 +88,14 @@ Global
 		{051DE316-C76C-4CFC-82DA-46C0B04CFAD8}.Release|Win32.ActiveCfg = Release|Win32
 		{051DE316-C76C-4CFC-82DA-46C0B04CFAD8}.Release|x64.ActiveCfg = Release|x64
 		{051DE316-C76C-4CFC-82DA-46C0B04CFAD8}.Release|x64.Build.0 = Release|x64
+		{4065FBE0-4470-479A-AED6-7CD3D3D628C7}.Debug|Win32.ActiveCfg = Debug|Win32
+		{4065FBE0-4470-479A-AED6-7CD3D3D628C7}.Debug|Win32.Build.0 = Debug|Win32
+		{4065FBE0-4470-479A-AED6-7CD3D3D628C7}.Debug|x64.ActiveCfg = Debug|x64
+		{4065FBE0-4470-479A-AED6-7CD3D3D628C7}.Debug|x64.Build.0 = Debug|x64
+		{4065FBE0-4470-479A-AED6-7CD3D3D628C7}.Release|Win32.ActiveCfg = Release|Win32
+		{4065FBE0-4470-479A-AED6-7CD3D3D628C7}.Release|Win32.Build.0 = Release|Win32
+		{4065FBE0-4470-479A-AED6-7CD3D3D628C7}.Release|x64.ActiveCfg = Release|x64
+		{4065FBE0-4470-479A-AED6-7CD3D3D628C7}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

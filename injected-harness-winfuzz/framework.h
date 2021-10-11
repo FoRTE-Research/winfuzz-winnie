@@ -1,0 +1,24 @@
+#pragma once
+// Windows Header Files
+#include <windows.h>
+#include <winbase.h>
+#include <winuser.h>
+#include <winternl.h>
+#include <excpt.h>
+#include <psapi.h>
+#include <tchar.h>
+#include <stdio.h>
+#include <setjmp.h>
+#include <string.h>
+#include <string>
+#include <cstdint>
+#include <fstream>
+#include <iostream>
+#include <processenv.h>
+#include <tlhelp32.h>
+#include <immintrin.h>
+#include <vector>
+#include <map>
+#include <mutex>
+// Detours
+#include <detours.h>
