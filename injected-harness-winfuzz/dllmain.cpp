@@ -443,8 +443,11 @@ breakpoint_t RestoreBreakpoint(LPVOID target)
 	return breakpoint;
 }
 
+LPVOID last_target = 0;
+
 BOOL DoesBreakpointExists(LPVOID target)
 {
+	last_target = target;
 	breakpoints_mutex.lock();
 	BOOL result = breakpoints.find(target) != breakpoints.end();
 	breakpoints_mutex.unlock();
@@ -520,6 +523,7 @@ void install_breakpoints() {
 		//trace_printf("mname:%s, baseaddr:%p rva: %p\n", cov_info->BasicBlocks[i].ModuleName, hModule, cov_info->BasicBlocks[i].Rva);
 		InstallBreakpoint(hModule, cov_info->BasicBlocks[i].Rva);
 		if (i % 10000 == 0) fuzzer_printf(".");
+		//fuzzer_printf("BP Info -> %p %s\n", cov_info->BasicBlocks[i].Rva, cov_info->BasicBlocks[i].ModuleName);
 	}
 	fuzzer_printf("\nInstalled %zu breakpoints\n", cov_info->NumberOfBasicBlocks);
 }
@@ -858,6 +862,7 @@ void TerminateProcess_hook(EXCEPTION_POINTERS* ExceptionInfo)
 	HANDLE hProcess = *(HANDLE*)(esp + 4);
 #endif
 	if (GetCurrentProcess() == hProcess || GetCurrentProcessId() == GetProcessId(hProcess))
+	debug_printf("In TP Hook\n");
 	{
 		//trace_printf("Exit5 %d\n", handlerReentrancy);
 		InterlockedDecrement(&handlerReentrancy);
@@ -870,7 +875,6 @@ void TerminateProcess_hook(EXCEPTION_POINTERS* ExceptionInfo)
 LONG WINAPI BreakpointHandler(EXCEPTION_POINTERS *ExceptionInfo)
 {
 	in_target = false;
-	//trace_printf("Enter %d\n", handlerReentrancy);
 	if (InterlockedIncrement(&handlerReentrancy) != 1)
 	{
 		system("PAUSE");
@@ -945,10 +949,12 @@ LONG WINAPI BreakpointHandler(EXCEPTION_POINTERS *ExceptionInfo)
 					// exception will eventually bubble up to ChildCrashHandler.
 					//trace_printf("Exit2 %d\n", handlerReentrancy);
 					InterlockedDecrement(&handlerReentrancy);
+					in_target = true;
 					return EXCEPTION_CONTINUE_SEARCH;
 				}
 			}
 			//trace_printf("Exit3 %d\n", handlerReentrancy);
+			debug_printf("Decrement 952");
 			InterlockedDecrement(&handlerReentrancy);
 			in_target = true;
 			return EXCEPTION_CONTINUE_EXECUTION;
@@ -960,6 +966,7 @@ LONG WINAPI BreakpointHandler(EXCEPTION_POINTERS *ExceptionInfo)
 	debug_printf("Ignoring exception %08x at %p, referencing %p\n", ExceptionInfo->ExceptionRecord->ExceptionCode, (void*)ExceptionInfo->ContextRecord->INSTRUCTION_POINTER, ExceptionInfo->ExceptionRecord->ExceptionAddress);
 	//trace_printf("Exit4 %d\n", handlerReentrancy);
 	InterlockedDecrement(&handlerReentrancy);
+	in_target = true;
 	return EXCEPTION_CONTINUE_SEARCH;
 }
 
@@ -1372,6 +1379,7 @@ extern "C" _declspec(noreturn) void harness_main()
 	// Place to put guard handler
 	install_guard_handler();
 
+	in_target = false;
 	install_breakpoints();
 	// Restore target hook stolen bytes
 	PatchCode(target_address, targetStolenBytes, TRAMPOLINE_SIZE, NULL);

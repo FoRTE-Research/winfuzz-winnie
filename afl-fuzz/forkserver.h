@@ -60,6 +60,7 @@ int fork_run_child();
 // --- Persistent mode ---
 void reset_persistent();
 void start_persistent(char** argv, uint32_t timeout, uint32_t init_timeout);
+int is_child_running();
 int run_with_persistent();
 
 struct winafl_breakpoint {

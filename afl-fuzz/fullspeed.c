@@ -145,7 +145,7 @@ static int run_target_fullspeed_persistent(char **argv, uint32_t timeout, uint32
 		kill_process();
 	} else {
 		arm_watchdog_timer(timeout * 2);
-		if (persistent_pid < 0) {
+		if (persistent_pid < 0 || !is_child_running()) {
 			//ACTF("Launch new persistent server\n");
 			start_persistent(argv, timeout, init_timeout);
 		}

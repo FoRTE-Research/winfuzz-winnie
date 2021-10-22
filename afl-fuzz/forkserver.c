@@ -282,6 +282,25 @@ void get_coverage_info(u32 *visited_bbs_out, u32 *total_bbs_out) {
 	*total_bbs_out = total_bbs;
 }
 
+CRITICAL_SECTION critical_section;
+bool critical_sec_initialized = false;
+
+int is_child_running() {
+
+	if (!critical_sec_initialized) {
+		InitializeCriticalSection(&critical_section);
+		critical_sec_initialized = true;
+	}
+
+	int ret;
+
+	EnterCriticalSection(&critical_section);
+	ret = (child_handle && (WaitForSingleObject(child_handle, 0) == WAIT_TIMEOUT));
+	LeaveCriticalSection(&critical_section);
+
+	return ret;
+}
+
 // starts the forkserver process
 static void start_process(char *cmd) {	
     STARTUPINFOA si;
@@ -366,7 +385,7 @@ void kill_process() {
 	hPipeChild = NULL;	
 }
 
-#define FORKSERVER_DLL "forkserver.dll"
+#define FORKSERVER_DLL "injected-harness-winfuzz.dll"
 
 int get_child_result()
 {
@@ -540,6 +559,7 @@ CLIENT_ID spawn_child_with_injection(char* cmd, INJECTION_MODE injection_type, u
 	}
 
 	AFL_SETTINGS fuzzer_settings;
+	debug_printf("FUZZER SETTINGS: %s %d\n", options.fuzz_harness, injection_type);
 	strncpy(fuzzer_settings.harness_name, options.fuzz_harness, sizeof(fuzzer_settings.harness_name));
 	strncpy(fuzzer_settings.minidump_path, options.minidump_path, sizeof(fuzzer_settings.minidump_path));
 	fuzzer_settings.timeout = timeout;
