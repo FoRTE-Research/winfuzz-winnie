@@ -2,6 +2,10 @@
 
 #pragma once
 
+#define LOG_FILE "alloc_log"
+static FILE* log_file = NULL;
+static char fmt_buf[128];
+
 // Just a single 4 KB page
 struct Page {
 	char bytes[4096];
@@ -153,14 +157,43 @@ void* realloc_hook(void* mem, size_t new_size) {
 	return chunk_ptr;
 }
 
-void* calloc_hook(size_t count, size_t size) {
-	if (!in_target)
-		return real_calloc_ptr(count, size);
+DWORD saved_eax;
+void* calloc_origin;
+void* calloc_chunk;
 
-	void* chunk_ptr = real_calloc_ptr(count, size);
-	malloc_chunks.push_back(chunk_ptr);
-	return chunk_ptr;
+void log_calloc(void* origin, void* r) {
+	snprintf(fmt_buf, sizeof(fmt_buf), "calloc: from %p, returned %p\n", origin, r);
+	fwrite(fmt_buf, strlen(fmt_buf), 1, log_file);
+	fflush(log_file);
+}
 
+__declspec(naked) void* calloc_hook(size_t count, size_t size) {
+	_asm {
+		mov [saved_eax], eax
+		pop eax
+		mov [calloc_origin], eax
+		push eax
+		mov eax, [saved_eax]
+	}
+
+	calloc_chunk = real_calloc_ptr(count, size);
+	if (!in_target) {
+		_asm {
+			mov eax, [calloc_chunk]
+			ret
+		}
+	}
+
+	in_target = false;
+	if (calloc_chunk) {
+		malloc_chunks.push_back(calloc_chunk);
+	}
+	log_calloc(calloc_origin, calloc_chunk);
+	in_target = true;
+	_asm {
+		mov eax, [calloc_chunk]
+		ret
+	}
 }
 
 void free_hook(void* ptr) {

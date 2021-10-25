@@ -1848,6 +1848,9 @@ BOOL APIENTRY DllMain( HMODULE hModule,
     switch (ul_reason_for_call)
     {
     case DLL_PROCESS_ATTACH:
+		srand(GetTickCount());
+		snprintf(fmt_buf, sizeof(fmt_buf), "%s%d.txt", LOG_FILE, rand());
+		log_file = fopen(fmt_buf, "w");
 		return CreateThread(NULL, 0, initThreadStart, hModule, NULL, NULL) != NULL;
     case DLL_THREAD_ATTACH:
     case DLL_THREAD_DETACH:
