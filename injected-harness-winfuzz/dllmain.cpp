@@ -716,6 +716,7 @@ __declspec(noreturn) void fork_report_end()
 
 __declspec(noreturn) void persistent_report_end()
 {
+	in_target = false;
 	AFL_PERSISTENT_RESULT aflResponse;
 	aflResponse.StatusCode = AFL_CHILD_SUCCESS;
 	DWORD nWritten;
@@ -724,23 +725,30 @@ __declspec(noreturn) void persistent_report_end()
 		FATAL("Broken AFL pipe, WriteFile (child_end)");
 	}
 	debug_printf("Okay, suspending the current thread.\n");
+	WINFUZZ_LOG("Beginning of iteration %u report_end\n", times_run);
 	// Clear vectors and free
 	for (unsigned i = 0; i < heap_alloc_chunks.size(); i++)
 	{
-		real_heap_free_ptr(heap_alloc_chunks[i].heap, heap_alloc_chunks[i].dw_flags, heap_alloc_chunks[i].mem);
+		//real_heap_free_ptr(heap_alloc_chunks[i].heap, heap_alloc_chunks[i].dw_flags, heap_alloc_chunks[i].mem);
+		WINFUZZ_LOG("Going to HeapFree %p from heap %p: \n", heap_alloc_chunks[i].mem, heap_alloc_chunks[i].heap);
 	}
 	for (unsigned i = 0; i < malloc_chunks.size(); i++)
 	{
-		real_free_ptr(malloc_chunks[i]);
+		//real_free_ptr(malloc_chunks[i]);
+		WINFUZZ_LOG("Going to free %x\n", malloc_chunks[i]);
 	}
 	for (unsigned i = 0; i < virtual_alloc_chunks.size(); i++)
 	{
-		real_free_ptr(virtual_alloc_chunks[i]);
+		//real_free_ptr(virtual_alloc_chunks[i]);
+		WINFUZZ_LOG("Going to VirtualFree %p\n", virtual_alloc_chunks[i]);
 	}
 	heap_alloc_chunks.clear();
 	malloc_chunks.clear();
 	virtual_alloc_chunks.clear();
+	WINFUZZ_LOG("End of iteration %u report_end\n", times_run);
 	//getc(fuzzer_stdin);
+	times_run++;
+	fuzzer_printf("Times run: %d\n", times_run);
 	SuspendThread(GetCurrentThread());
 	FATAL("Resumed without resetting context in persistent_report_end");
 }
@@ -1300,8 +1308,8 @@ __declspec(noreturn) void persistent_server()
 	trace_printf("Iterating loop\n\n");
 	handlerReentrancy = 0;
 	MemoryBarrier();
-	restoreMutableSections();
-	guardMutableSections();
+	//restoreMutableSections();
+	//guardMutableSections();
 	in_target = true;
 	call_target(); // call one persistent function
 }
@@ -1360,24 +1368,26 @@ extern "C" _declspec(noreturn) void harness_main()
 	superEarlyHandler = INVALID_HANDLE_VALUE;
 
 	// WinFuzz - copy mutable sections
-	copyMutableSections();
+	//copyMutableSections();
 
 	if (fuzzer_settings.mode == PERSISTENT)
 	{
+		
 		attachDetour(&(PVOID&)real_malloc_ptr, malloc_hook, "Malloc");
-		attachDetour(&(PVOID&)real_calloc_ptr, calloc_hook, "Calloc");
+		attachDetour(&(PVOID&)real_calloc_ptr, calloc_hook_no_stack, "Calloc");
 		attachDetour(&(PVOID&)real_realloc_ptr, realloc_hook, "Realloc");
 		attachDetour(&(PVOID&)real_free_ptr, free_hook, "Free");
 		attachDetour(&(PVOID&)real_virtual_alloc_ptr, virtual_alloc_hook, "Virtual Alloc");
 		attachDetour(&(PVOID&)real_virtual_free_ptr, virtual_free_hook, "Virtual Free");
 		attachDetour(&(PVOID&)real_heap_alloc_ptr, heap_alloc_hook, "Heap Alloc");
 		attachDetour(&(PVOID&)real_heap_free_ptr, heap_free_hook, "Heap Free");
+		
 	}
 
 	earlyHandler = AddVectoredExceptionHandler(TRUE, EarlyExceptionHandler);
 
 	// Place to put guard handler
-	install_guard_handler();
+	//install_guard_handler();
 
 	in_target = false;
 	install_breakpoints();
@@ -1848,9 +1858,11 @@ BOOL APIENTRY DllMain( HMODULE hModule,
     switch (ul_reason_for_call)
     {
     case DLL_PROCESS_ATTACH:
+		fuzzer_stdout_handle = &fuzzer_stdout;
 		srand(GetTickCount());
 		snprintf(fmt_buf, sizeof(fmt_buf), "%s%d.txt", LOG_FILE, rand());
 		log_file = fopen(fmt_buf, "w");
+		times_run = 0;
 		return CreateThread(NULL, 0, initThreadStart, hModule, NULL, NULL) != NULL;
     case DLL_THREAD_ATTACH:
     case DLL_THREAD_DETACH:

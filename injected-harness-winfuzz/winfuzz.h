@@ -4,7 +4,10 @@
 
 #define LOG_FILE "alloc_log"
 static FILE* log_file = NULL;
-static char fmt_buf[128];
+static char fmt_buf[4096];
+static unsigned int times_run = 0;
+static FILE** fuzzer_stdout_handle = NULL;
+#define winfuzz_fuzzer_printf(...) fprintf(*fuzzer_stdout_handle, ##__VA_ARGS__##);
 
 // Just a single 4 KB page
 struct Page {
@@ -41,8 +44,8 @@ void*  (*real_malloc_ptr)(size_t size) = malloc;
 void(_cdecl* real_free_ptr)(void* mem) = free;
 LPVOID(__stdcall* real_heap_alloc_ptr)(HANDLE heap, DWORD dw_flags, SIZE_T dw_bytes) = HeapAlloc;
 BOOL(__stdcall* real_heap_free_ptr)(HANDLE heap, DWORD dw_flags, _Frees_ptr_opt_ LPVOID mem) = HeapFree;
-void*  (_cdecl* real_realloc_ptr)(void* mem, size_t new_size) = realloc;
-void*  (_cdecl* real_calloc_ptr)(size_t count, size_t size) = calloc;
+void*  (__cdecl* real_realloc_ptr)(void* mem, size_t new_size) = realloc;
+void*  (__cdecl* real_calloc_ptr)(size_t count, size_t size) = calloc;
 LPVOID(__stdcall* real_virtual_alloc_ptr)(LPVOID lpAddress, SIZE_T dwSize, DWORD  flAllocationType, DWORD  flProtect) = VirtualAlloc;
 BOOL(__stdcall* real_virtual_free_ptr)(LPVOID lpAddress, SIZE_T dwSize, DWORD  dwFreeType) = VirtualFree;
 
@@ -131,7 +134,7 @@ typedef struct heap_alloc_metadata {
 
 Vector<heap_alloc_metadata> heap_alloc_chunks = {};
 Vector<void *> malloc_chunks = {};
-Vector<void *>virtual_alloc_chunks = {};
+Vector<void *> virtual_alloc_chunks = {};
 
 void* malloc_hook(size_t size) {
 	if (!in_target)
@@ -160,23 +163,47 @@ void* realloc_hook(void* mem, size_t new_size) {
 DWORD saved_eax;
 void* calloc_origin;
 void* calloc_chunk;
+DWORD calloc_num;
+DWORD calloc_size;
+char* stack_pointer;
+DWORD parameters[5];
 
 void log_calloc(void* origin, void* r) {
-	snprintf(fmt_buf, sizeof(fmt_buf), "calloc: from %p, returned %p\n", origin, r);
+	snprintf(fmt_buf, sizeof(fmt_buf), "calloc: from %p, returned %p.\nstack is: \n\t%x\n\t%x\n\t%x\n\t%x\n\t%x\n", origin, r, parameters[0], parameters[1], parameters[2], parameters[3], parameters[4]);
 	fwrite(fmt_buf, strlen(fmt_buf), 1, log_file);
 	fflush(log_file);
 }
 
-__declspec(naked) void* calloc_hook(size_t count, size_t size) {
+#define WINFUZZ_LOG(...) fprintf(log_file, ##__VA_ARGS__##);
+
+void* __cdecl calloc_hook_no_stack(size_t count, size_t size) {
+	calloc_chunk = real_calloc_ptr(count, size);
+	if (!in_target) {
+		return calloc_chunk;
+	}
+
+	in_target = false;
+	if (calloc_chunk) {
+		malloc_chunks.push_back(calloc_chunk);
+	}
+	//log_calloc(calloc_origin, calloc_chunk, count, size);
+	//winfuzz_fuzzer_printf("calloc returned %p (size %u)\n", calloc_chunk, count * size);
+	WINFUZZ_LOG("calloc returned %p (size %u)\n", calloc_chunk, count * size);
+	in_target = true;
+	return calloc_chunk;
+}
+
+__declspec(naked) void* __cdecl calloc_hook(size_t count, size_t size) {
 	_asm {
+		mov [stack_pointer], esp
 		mov [saved_eax], eax
 		pop eax
 		mov [calloc_origin], eax
 		push eax
 		mov eax, [saved_eax]
 	}
-
-	calloc_chunk = real_calloc_ptr(count, size);
+	memcpy(parameters, stack_pointer, sizeof(parameters));
+	calloc_chunk = real_calloc_ptr(parameters[2], parameters[1]);
 	if (!in_target) {
 		_asm {
 			mov eax, [calloc_chunk]
@@ -185,10 +212,11 @@ __declspec(naked) void* calloc_hook(size_t count, size_t size) {
 	}
 
 	in_target = false;
+	log_calloc(calloc_origin, calloc_chunk);
 	if (calloc_chunk) {
 		malloc_chunks.push_back(calloc_chunk);
 	}
-	log_calloc(calloc_origin, calloc_chunk);
+	
 	in_target = true;
 	_asm {
 		mov eax, [calloc_chunk]

@@ -90,7 +90,6 @@ __declspec(noinline) void __stdcall fuzz_me(char* filename)
     ZeroMemory(&buf, 201);
     FILE *fp = fopen(filename, "rb");
     fread(buf, 1, 200, fp);
-
 	test_func_t test_func = test;// (test_func_t)GetProcAddress(hMathlib, "test"); // index
     int result = test_func(buf);
     printf("Result: %d\n", result);    
