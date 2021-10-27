@@ -113,6 +113,13 @@ public:
 	T& operator[](int idx) {
 		return arr[idx];
 	}
+	
+	void erase(int idx) {
+		for (int i = idx; i < siz - 1; ++i) {
+			arr[i] = arr[i + 1];
+		}
+		siz--;
+	}
 
 	~Vector() {
 		real_free_ptr(arr);
@@ -230,12 +237,15 @@ void free_hook(void* ptr) {
 		return;
 	}
 
+	in_target = false;
 	int idx = malloc_chunks.find(ptr);
 
 	if (idx != -1) {
-		malloc_chunks[idx] = NULL;
+		malloc_chunks.erase(idx);
+		in_target = true;
 		return real_free_ptr(ptr);
 	}
+	in_target = true;
 }
 
 

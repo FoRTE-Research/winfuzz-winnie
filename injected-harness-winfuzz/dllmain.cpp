@@ -734,7 +734,7 @@ __declspec(noreturn) void persistent_report_end()
 	}
 	for (unsigned i = 0; i < malloc_chunks.size(); i++)
 	{
-		//real_free_ptr(malloc_chunks[i]);
+		real_free_ptr(malloc_chunks[i]);
 		WINFUZZ_LOG("Going to free %x\n", malloc_chunks[i]);
 	}
 	for (unsigned i = 0; i < virtual_alloc_chunks.size(); i++)
