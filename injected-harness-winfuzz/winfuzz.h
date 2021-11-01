@@ -145,14 +145,39 @@ Vector<heap_alloc_metadata> heap_alloc_chunks = {};
 Vector<void *> malloc_chunks = {};
 Vector<void *> virtual_alloc_chunks = {};
 
+DWORD saved_eax;
+void* calloc_origin;
+void* calloc_chunk;
+DWORD calloc_num;
+DWORD calloc_size;
+char* stack_pointer;
+DWORD parameters[5];
+
+#define WINFUZZ_LOG(...) fprintf(log_file, ##__VA_ARGS__##); \
+fflush(log_file); \
+
 void* malloc_hook(size_t size) {
+	_asm {
+		mov[stack_pointer], ebp
+	}
+	memcpy(parameters, stack_pointer, sizeof(parameters));
 	if (!in_target)
 		return real_malloc_ptr(size);
 
 	void* chunk_ptr = real_malloc_ptr(size);
 
-	malloc_chunks.push_back(chunk_ptr);
+	// Check to see where call originated from
+	in_target = false;
+	WINFUZZ_LOG("\tParameters: %x %x %x %x %x\n", parameters[0], parameters[1], parameters[2], parameters[3], parameters[4]);
+	if (parameters[1] > target_code_start + target_code_size || parameters[1] < target_code_start) {
+		WINFUZZ_LOG("Rejected malloc from %x\n", parameters[1]);
+		in_target = true;
+		return chunk_ptr;
+	}
 
+	WINFUZZ_LOG("Target malloc: %p (from %x)\n", chunk_ptr, parameters[1]);
+	malloc_chunks.push_back(chunk_ptr);
+	in_target = true;
 	return chunk_ptr;
 }
 
@@ -169,22 +194,11 @@ void* realloc_hook(void* mem, size_t new_size) {
 	return chunk_ptr;
 }
 
-DWORD saved_eax;
-void* calloc_origin;
-void* calloc_chunk;
-DWORD calloc_num;
-DWORD calloc_size;
-char* stack_pointer;
-DWORD parameters[5];
-
 void log_calloc(void* origin, void* r) {
 	snprintf(fmt_buf, sizeof(fmt_buf), "calloc: from %p, returned %p.\nstack is: \n\t%x\n\t%x\n\t%x\n\t%x\n\t%x\n", origin, r, parameters[0], parameters[1], parameters[2], parameters[3], parameters[4]);
 	fwrite(fmt_buf, strlen(fmt_buf), 1, log_file);
 	fflush(log_file);
 }
-
-#define WINFUZZ_LOG(...) fprintf(log_file, ##__VA_ARGS__##); \
-fflush(log_file); \
 
 void* __cdecl calloc_hook_no_stack(size_t count, size_t size) {
 	_asm {
@@ -197,18 +211,24 @@ void* __cdecl calloc_hook_no_stack(size_t count, size_t size) {
 	}
 
 	// Check to see where call originated from
+	in_target = false;
+	WINFUZZ_LOG("calloc from %p returned %p (size %u)\n", parameters[1], calloc_chunk, count * size);
+	WINFUZZ_LOG("\tParameters: %x %x %x %x %x\n", parameters[0], parameters[1], parameters[2], parameters[3], parameters[4]);
 	if (parameters[1] > target_code_start + target_code_size || parameters[1] < target_code_start) {
+		WINFUZZ_LOG("Rejected calloc from %x\n", parameters[1]);
+		in_target = true;
 		return calloc_chunk;
 	}
+	else {
+		WINFUZZ_LOG("Tracking calloc from %x\n", parameters[1]);
+	}
 
-	in_target = false;
+	
 	if (calloc_chunk) {
 		malloc_chunks.push_back(calloc_chunk);
 	}
 	//log_calloc(calloc_origin, calloc_chunk, count, size);
 	//winfuzz_fuzzer_printf("calloc returned %p (size %u)\n", calloc_chunk, count * size);
-	WINFUZZ_LOG("calloc from %p returned %p (size %u)\n", parameters[1], calloc_chunk, count * size);
-	WINFUZZ_LOG("\tParameters: %x %x %x %x %x\n", parameters[0], parameters[1], parameters[2], parameters[3], parameters[4]);
 	in_target = true;
 	return calloc_chunk;
 }
@@ -266,9 +286,13 @@ void free_hook(void* ptr) {
 	int idx = malloc_chunks.find(ptr);
 
 	if (idx != -1) {
+		WINFUZZ_LOG("Erasing %p from malloc_chunks\n", malloc_chunks[idx]);
 		malloc_chunks.erase(idx);
 		in_target = true;
 		return real_free_ptr(ptr);
+	}
+	else {
+		WINFUZZ_LOG("Didn't find %p in list, not freeing\n", ptr);
 	}
 	in_target = true;
 }
