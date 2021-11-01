@@ -28,6 +28,8 @@ struct SectionCopy {
 
 // Disable hooks while executing target
 static bool in_target = false;
+static DWORD target_code_start = 0;
+static DWORD target_code_size = 0;
 
 void* malloc_hook(size_t size);
 void* realloc_hook(void* mem, size_t new_size);
@@ -181,11 +183,21 @@ void log_calloc(void* origin, void* r) {
 	fflush(log_file);
 }
 
-#define WINFUZZ_LOG(...) fprintf(log_file, ##__VA_ARGS__##);
+#define WINFUZZ_LOG(...) fprintf(log_file, ##__VA_ARGS__##); \
+fflush(log_file); \
 
 void* __cdecl calloc_hook_no_stack(size_t count, size_t size) {
+	_asm {
+		mov [stack_pointer], ebp
+	}
+	memcpy(parameters, stack_pointer, sizeof(parameters));
 	calloc_chunk = real_calloc_ptr(count, size);
 	if (!in_target) {
+		return calloc_chunk;
+	}
+
+	// Check to see where call originated from
+	if (parameters[1] > target_code_start + target_code_size || parameters[1] < target_code_start) {
 		return calloc_chunk;
 	}
 
@@ -195,7 +207,8 @@ void* __cdecl calloc_hook_no_stack(size_t count, size_t size) {
 	}
 	//log_calloc(calloc_origin, calloc_chunk, count, size);
 	//winfuzz_fuzzer_printf("calloc returned %p (size %u)\n", calloc_chunk, count * size);
-	WINFUZZ_LOG("calloc returned %p (size %u)\n", calloc_chunk, count * size);
+	WINFUZZ_LOG("calloc from %p returned %p (size %u)\n", parameters[1], calloc_chunk, count * size);
+	WINFUZZ_LOG("\tParameters: %x %x %x %x %x\n", parameters[0], parameters[1], parameters[2], parameters[3], parameters[4]);
 	in_target = true;
 	return calloc_chunk;
 }
@@ -232,8 +245,20 @@ __declspec(naked) void* __cdecl calloc_hook(size_t count, size_t size) {
 }
 
 void free_hook(void* ptr) {
+	_asm {
+		mov[stack_pointer], esp
+	}
 	if (!in_target) {
 		real_free_ptr(ptr);
+		return;
+	}
+
+	memcpy(parameters, stack_pointer, sizeof(parameters));
+	WINFUZZ_LOG("hooked free\n");
+	WINFUZZ_LOG("\tParameters: %x %x %x %x %x\n", parameters[0], parameters[1], parameters[2], parameters[3], parameters[4]);
+
+	// Check to see where call originated from
+	if (parameters[1] > target_code_start + target_code_size || parameters[1] < target_code_start) {
 		return;
 	}
 

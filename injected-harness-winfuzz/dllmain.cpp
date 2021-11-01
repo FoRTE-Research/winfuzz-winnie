@@ -39,6 +39,11 @@ void copyMutableSections()
 			numPages += (section[i].Misc.VirtualSize + sizeof(Page) - 1) / sizeof(Page);
 			sectionCopies.push_back(copy);
 		}
+		if (section[i].Characteristics & IMAGE_SCN_MEM_EXECUTE)
+		{
+			target_code_start = DWORD(base + section[i].VirtualAddress);
+			target_code_size = section[i].Misc.VirtualSize;
+		}
 	}
 	// Copy sections from tracked DLLs
 	HMODULE modules[1024];
@@ -726,6 +731,7 @@ __declspec(noreturn) void persistent_report_end()
 	}
 	debug_printf("Okay, suspending the current thread.\n");
 	WINFUZZ_LOG("Beginning of iteration %u report_end\n", times_run);
+	WINFUZZ_LOG("Target start: %x size: %x\n", target_code_start, target_code_size);
 	// Clear vectors and free
 	for (unsigned i = 0; i < heap_alloc_chunks.size(); i++)
 	{
@@ -1368,7 +1374,7 @@ extern "C" _declspec(noreturn) void harness_main()
 	superEarlyHandler = INVALID_HANDLE_VALUE;
 
 	// WinFuzz - copy mutable sections
-	//copyMutableSections();
+	copyMutableSections();
 
 	if (fuzzer_settings.mode == PERSISTENT)
 	{

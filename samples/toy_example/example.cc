@@ -95,6 +95,11 @@ __declspec(noinline) void __stdcall fuzz_me(char* filename)
     printf("Result: %d\n", result);    
     fclose(fp);  
 
+	// State reset/dynamic memory tracking tests
+	char* testAlloc = (char*)malloc(4096);
+	testAlloc[45] = 'a';
+	free(testAlloc);
+
     check_fwrite();
 
     TerminateProcess(INVALID_HANDLE_VALUE, 0); // Won't do anything
