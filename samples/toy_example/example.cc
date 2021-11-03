@@ -11,6 +11,8 @@
 typedef int (*test_func_t)(char*);
 HMODULE hMathlib;
 
+static int global_int = 0;
+
 void check_fwrite()
 {
     static int counter = 0;
@@ -96,9 +98,37 @@ __declspec(noinline) void __stdcall fuzz_me(char* filename)
     fclose(fp);  
 
 	// State reset/dynamic memory tracking tests
+	// Correct malloc
 	char* testAlloc = (char*)malloc(4096);
 	testAlloc[45] = 'a';
 	free(testAlloc);
+
+	// memory leak
+	testAlloc = (char*)malloc(4000);
+	testAlloc[36] = 'b';
+
+	// Global memory resetting
+	if (global_int != 0) {
+		*(volatile char*)0 = 1;
+	}
+	global_int++;
+
+	// Realloc
+	testAlloc = (char*)malloc(4012);
+	testAlloc[3] = 'b';
+	char* tmpAlloc = (char*)malloc(4096 * 1000);
+	tmpAlloc[45] = 'b';
+	testAlloc = (char*)realloc(testAlloc, 8192 * 4000);
+	free(tmpAlloc);
+
+	// VirtualAlloc
+	testAlloc = (char*)VirtualAlloc(NULL, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	testAlloc[45] = 'a';
+	VirtualFree(testAlloc, 0, MEM_RELEASE);
+
+	// VirtualAlloc leak
+	testAlloc = (char*)VirtualAlloc(NULL, 4096 * 1024 * 10, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	testAlloc[45] = 'a';
 
     check_fwrite();
 

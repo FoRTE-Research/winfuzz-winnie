@@ -136,7 +136,7 @@ typedef struct heap_alloc_metadata {
 	LPVOID mem;
 
 	bool operator==(const heap_alloc_metadata& other) {
-		return (mem == other.mem);
+		return (mem == other.mem) && (heap == other.heap);
 	}
 
 } heap_alloc_metadata_t;
@@ -182,15 +182,32 @@ void* malloc_hook(size_t size) {
 }
 
 void* realloc_hook(void* mem, size_t new_size) {
+	_asm {
+		mov[stack_pointer], ebp
+	}
+	memcpy(parameters, stack_pointer, sizeof(parameters));
 	if (!in_target)
 		return real_realloc_ptr(mem, new_size);
 
+	in_target = false;
 	void * chunk_ptr = real_realloc_ptr(mem, new_size);
-
+	WINFUZZ_LOG("Target realloc of size %u returned %p (original: %p)\n", new_size, chunk_ptr, mem);
 	if (chunk_ptr != mem) {
+		// Reject calls from outside target
+		if (parameters[1] > target_code_start + target_code_size || parameters[1] < target_code_start) {
+			WINFUZZ_LOG("Rejected realloc from %x\n", parameters[1]);
+			in_target = true;
+			return chunk_ptr;
+		}
+
+		int idx = -1;
+		if ((idx = malloc_chunks.find(mem)) != -1) {
+			malloc_chunks.erase(idx);
+		}
 		malloc_chunks.push_back(chunk_ptr);
 	}
 
+	in_target = true;
 	return chunk_ptr;
 }
 
@@ -299,57 +316,117 @@ void free_hook(void* ptr) {
 
 
 LPVOID __stdcall heap_alloc_hook(HANDLE heap, DWORD dw_flags, SIZE_T dw_bytes) {
+	_asm {
+		mov[stack_pointer], ebp
+	}
+	memcpy(parameters, stack_pointer, sizeof(parameters));
 	if (!in_target)
 		return real_heap_alloc_ptr(heap, dw_flags, dw_bytes);
 
 	void* chunk_ptr = real_heap_alloc_ptr(heap, dw_flags, dw_bytes);
 
-	if (!chunk_ptr) {
-		heap_alloc_chunks.push_back({ heap, dw_flags, chunk_ptr });
-
+	// Check to see where call originated from
+	in_target = false;
+	if (parameters[1] > target_code_start + target_code_size || parameters[1] < target_code_start) {
+		WINFUZZ_LOG("Rejecting HeapAlloc from outside target (%x)\n", parameters[1]);
+		in_target = true;
+		return chunk_ptr;
 	}
 
-	return chunk_ptr;
+	WINFUZZ_LOG("Target HeapAlloc (heap=%p, dw_flags=%x, dw_bytes=%u) returned %p\n", heap, dw_flags, dw_bytes, chunk_ptr);
+	if (chunk_ptr) {
+		heap_alloc_metadata n = {};
+		n.heap = heap;
+		n.dw_flags = dw_flags;
+		n.mem = chunk_ptr;
+		heap_alloc_chunks.push_back(n);
+	}
 
+	in_target = true;
+	return chunk_ptr;
 }
 
 BOOL __stdcall heap_free_hook(HANDLE heap, DWORD dw_flags, _Frees_ptr_opt_ LPVOID mem) {
+	_asm {
+		mov[stack_pointer], ebp
+	}
+	memcpy(parameters, stack_pointer, sizeof(parameters));
 	if (!in_target)
 		return real_heap_free_ptr(heap, dw_flags, mem);
 
+	// Check to see where call originated from
+	in_target = false;
+	if (parameters[1] > target_code_start + target_code_size || parameters[1] < target_code_start) {
+		WINFUZZ_LOG("Rejecting HeapFree from outside target (%x)\n", parameters[1]);
+		in_target = true;
+		return real_heap_free_ptr(heap, dw_flags, mem);
+	}
+
+	WINFUZZ_LOG("Target HeapFree (heap=%p, dw_flags=%x, mem=%p)\n", heap, dw_flags, mem);
 	heap_alloc_metadata_t h = { heap, dw_flags, mem };
 	int idx = heap_alloc_chunks.find(h);
 	if (idx != -1) {
-		heap_alloc_chunks[idx] = {};
-
+		heap_alloc_chunks.erase(idx);
+		in_target = true;
 		return real_heap_free_ptr(heap, dw_flags, mem);
-
 	}
+	else {
+		WINFUZZ_LOG("Could not find metadata for HeapFree (heap=%p, dw_flags=%x, mem=%p\n", heap, dw_flags, mem);
+	}
+	in_target = true;
 	return true;
 }
 
 LPVOID virtual_alloc_hook(LPVOID lpAddress, SIZE_T dwSize, DWORD  flAllocationType, DWORD  flProtect) {
+	_asm {
+		mov[stack_pointer], ebp
+	}
+	memcpy(parameters, stack_pointer, sizeof(parameters));
 	if (!in_target)
 		return real_virtual_alloc_ptr(lpAddress, dwSize, flAllocationType, flProtect);
 
 	void* chunk_ptr = real_virtual_alloc_ptr(lpAddress, dwSize, flAllocationType, flProtect);
 
+	in_target = false;
+	if (parameters[1] > target_code_start + target_code_size || parameters[1] < target_code_start) {
+		WINFUZZ_LOG("Rejecting VirtualAlloc from outside target (%x)\n", parameters[1]);
+		in_target = true;
+		return chunk_ptr;
+	}
+
+	WINFUZZ_LOG("Target VirtualAlloc (lpAddress=%p, dwSize=%u, flAllocationType=%x, flProtect=%x)\n", lpAddress, dwSize, flAllocationType, flProtect);
+
 	virtual_alloc_chunks.push_back(chunk_ptr);
+	in_target = true;
 	return chunk_ptr;
 }
 
 BOOL virtual_free_hook(LPVOID lpAddress, SIZE_T dwSize, DWORD  dwFreeType) {
+	_asm {
+		mov[stack_pointer], ebp
+	}
+	memcpy(parameters, stack_pointer, sizeof(parameters));
 	if (!in_target)
 		return real_virtual_free_ptr(lpAddress, dwSize, dwFreeType);
 
+	in_target = false;
+	if (parameters[1] > target_code_start + target_code_size || parameters[1] < target_code_start) {
+		WINFUZZ_LOG("Rejecting VirtualFree from outside target (%x)\n", parameters[1]);
+		in_target = true;
+		return true;
+	}
+
+	WINFUZZ_LOG("Target VirtualFree (lpAddress=%p, dwSize=%u, dwFreeType=%x)\n", lpAddress, dwSize, dwFreeType);
 	int idx = virtual_alloc_chunks.find(lpAddress);
 
 	if (idx != -1) {
+		virtual_alloc_chunks.erase(idx);
+		in_target = true;
 		return real_virtual_free_ptr(lpAddress, dwSize, dwFreeType);
 	}
 
+	in_target = true;
 	return false;
-
 }
 
 Vector<Page*> modifiedPages;

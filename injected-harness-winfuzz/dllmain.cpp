@@ -489,9 +489,9 @@ void InlineHook(PVOID pOrgFn, PVOID pNewFn, PVOID* ppOrgFnCall, size_t stolenCou
 	debug_printf("inlinehook 1\n");
 	AssembleTrampoline((PBYTE)*ppOrgFnCall + stolenCount, (uintptr_t)pOrgFn + stolenCount, NULL);
 	debug_printf("inlinehook 2\n");
-
+	debug_printf("Stolen count = %u\n", stolenCount);
 	// Assemble the code BEFORE hooking, lest we suffer reentrancy issues...
-	debug_printf("will copy %lld bytes\n", stolenCount - TRAMPOLINE_SIZE);
+	debug_printf("will copy %u bytes\n", stolenCount - TRAMPOLINE_SIZE);
 	memcpy((PBYTE)*ppOrgFnCall + TRAMPOLINE_SIZE, (PBYTE)pOrgFn + TRAMPOLINE_SIZE, stolenCount - TRAMPOLINE_SIZE);
 	debug_printf("inlinehook 3\n");
 
@@ -745,7 +745,7 @@ __declspec(noreturn) void persistent_report_end()
 	}
 	for (unsigned i = 0; i < virtual_alloc_chunks.size(); i++)
 	{
-		//real_free_ptr(virtual_alloc_chunks[i]);
+		real_virtual_free_ptr(virtual_alloc_chunks[i], 0, MEM_RELEASE);
 		WINFUZZ_LOG("Going to VirtualFree %p\n", virtual_alloc_chunks[i]);
 	}
 	heap_alloc_chunks.clear();
@@ -1095,7 +1095,7 @@ __declspec(noreturn) void do_child()
 PROCESS_INFORMATION do_fork()
 {
 	// spawn new child with fork
-	PROCESS_INFORMATION pi;
+	PROCESS_INFORMATION pi = {};
 	DWORD pid = 0;//fork(&pi);
 	if (pid == -1)
 	{
@@ -1314,8 +1314,8 @@ __declspec(noreturn) void persistent_server()
 	trace_printf("Iterating loop\n\n");
 	handlerReentrancy = 0;
 	MemoryBarrier();
-	//restoreMutableSections();
-	//guardMutableSections();
+	restoreMutableSections();
+	guardMutableSections();
 	in_target = true;
 	call_target(); // call one persistent function
 }
@@ -1393,7 +1393,7 @@ extern "C" _declspec(noreturn) void harness_main()
 	earlyHandler = AddVectoredExceptionHandler(TRUE, EarlyExceptionHandler);
 
 	// Place to put guard handler
-	//install_guard_handler();
+	install_guard_handler();
 
 	in_target = false;
 	install_breakpoints();
@@ -1864,6 +1864,7 @@ BOOL APIENTRY DllMain( HMODULE hModule,
     switch (ul_reason_for_call)
     {
     case DLL_PROCESS_ATTACH:
+		//system("PAUSE");
 		fuzzer_stdout_handle = &fuzzer_stdout;
 		srand(GetTickCount());
 		snprintf(fmt_buf, sizeof(fmt_buf), "%s%d.txt", LOG_FILE, rand());
