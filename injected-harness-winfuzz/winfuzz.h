@@ -153,6 +153,8 @@ DWORD calloc_size;
 char* stack_pointer;
 DWORD parameters[5];
 
+DWORD current_ret_val = NULL;
+
 #define WINFUZZ_LOG(...) fprintf(log_file, ##__VA_ARGS__##); \
 fflush(log_file); \
 
@@ -164,18 +166,19 @@ void* malloc_hook(size_t size) {
 	if (!in_target)
 		return real_malloc_ptr(size);
 
+	current_ret_val = parameters[1];
 	void* chunk_ptr = real_malloc_ptr(size);
 
 	// Check to see where call originated from
 	in_target = false;
 	WINFUZZ_LOG("\tParameters: %x %x %x %x %x\n", parameters[0], parameters[1], parameters[2], parameters[3], parameters[4]);
-	if (parameters[1] > target_code_start + target_code_size || parameters[1] < target_code_start) {
-		WINFUZZ_LOG("Rejected malloc from %x\n", parameters[1]);
+	if (current_ret_val > target_code_start + target_code_size || current_ret_val < target_code_start) {
+		WINFUZZ_LOG("Rejected malloc from %x\n", current_ret_val);
 		in_target = true;
 		return chunk_ptr;
 	}
 
-	WINFUZZ_LOG("Target malloc: %p (from %x)\n", chunk_ptr, parameters[1]);
+	WINFUZZ_LOG("Target malloc: %p (from %x)\n", chunk_ptr, current_ret_val);
 	malloc_chunks.push_back(chunk_ptr);
 	in_target = true;
 	return chunk_ptr;
@@ -328,7 +331,7 @@ LPVOID __stdcall heap_alloc_hook(HANDLE heap, DWORD dw_flags, SIZE_T dw_bytes) {
 	// Check to see where call originated from
 	in_target = false;
 	if (parameters[1] > target_code_start + target_code_size || parameters[1] < target_code_start) {
-		WINFUZZ_LOG("Rejecting HeapAlloc from outside target (%x)\n", parameters[1]);
+		WINFUZZ_LOG("Rejecting HeapAlloc from outside target (%x) returning (%p) \n", parameters[1], chunk_ptr);
 		in_target = true;
 		return chunk_ptr;
 	}
