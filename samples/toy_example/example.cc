@@ -130,6 +130,16 @@ __declspec(noinline) void __stdcall fuzz_me(char* filename)
 	testAlloc = (char*)VirtualAlloc(NULL, 4096 * 1024 * 10, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 	testAlloc[45] = 'a';
 
+	// HeapAlloc
+	testAlloc = (char*)HeapAlloc(GetProcessHeap(), 0, 4098);
+	testAlloc[47] = 'y';
+	HeapFree(GetProcessHeap(), 0, testAlloc);
+
+	// HeapAlloc leak
+	testAlloc = (char*)HeapAlloc(GetProcessHeap(), 0, 8192 * 100);
+
+	// ???
+
     check_fwrite();
 
     TerminateProcess(INVALID_HANDLE_VALUE, 0); // Won't do anything

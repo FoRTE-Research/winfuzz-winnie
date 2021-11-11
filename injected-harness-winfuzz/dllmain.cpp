@@ -857,6 +857,9 @@ void CreateFile_hook(EXCEPTION_POINTERS *ExceptionInfo)
 	std::wstring wStrBuf(testStr->Buffer, testStr->Length / sizeof(WCHAR));
 	const wchar_t *wStr = wStrBuf.c_str();
 	debug_printf("Filename = %ls\n", wStr);
+	for (int i = 0; i < lstrlenW(testStr->Buffer); i++) {
+		debug_printf("Byte %d: %c (%x)\n", i, testStr->Buffer[i], testStr->Buffer[i]);
+	}
 	if (wcsstr(wStr, input_name))
 	{
 		// overwrite buffer
@@ -891,7 +894,7 @@ LONG WINAPI BreakpointHandler(EXCEPTION_POINTERS *ExceptionInfo)
 	in_target = false;
 	if (InterlockedIncrement(&handlerReentrancy) != 1)
 	{
-		system("PAUSE");
+		//system("PAUSE");
 		FATAL("The breakpoint handler itself generated an exeption (code=%08x, IP=%p) !!! Likely the breakpoint handler is faulty!!", ExceptionInfo->ExceptionRecord->ExceptionCode, ExceptionInfo->ContextRecord->INSTRUCTION_POINTER);
 	}
 
@@ -1378,7 +1381,6 @@ extern "C" _declspec(noreturn) void harness_main()
 
 	if (fuzzer_settings.mode == PERSISTENT)
 	{
-		
 		attachDetour(&(PVOID&)real_malloc_ptr, malloc_hook, "Malloc");
 		attachDetour(&(PVOID&)real_calloc_ptr, calloc_hook_no_stack, "Calloc");
 		attachDetour(&(PVOID&)real_realloc_ptr, realloc_hook, "Realloc");
@@ -1387,7 +1389,6 @@ extern "C" _declspec(noreturn) void harness_main()
 		attachDetour(&(PVOID&)real_virtual_free_ptr, virtual_free_hook, "Virtual Free");
 		attachDetour(&(PVOID&)real_heap_alloc_ptr, heap_alloc_hook, "Heap Alloc");
 		attachDetour(&(PVOID&)real_heap_free_ptr, heap_free_hook, "Heap Free");
-		
 	}
 
 	earlyHandler = AddVectoredExceptionHandler(TRUE, EarlyExceptionHandler);

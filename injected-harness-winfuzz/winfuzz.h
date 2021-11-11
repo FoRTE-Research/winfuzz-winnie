@@ -155,8 +155,15 @@ DWORD parameters[5];
 
 DWORD current_ret_val = NULL;
 
-#define WINFUZZ_LOG(...) fprintf(log_file, ##__VA_ARGS__##); \
-fflush(log_file); \
+//#define WINFUZZ_DEBUG
+
+#ifdef WINFUZZ_DEBUG
+#define WINFUZZ_LOG(...) \
+fprintf(log_file, ##__VA_ARGS__##); \
+fflush(log_file);
+#else
+#define WINFUZZ_LOG(...)
+#endif
 
 void* malloc_hook(size_t size) {
 	_asm {
@@ -167,11 +174,11 @@ void* malloc_hook(size_t size) {
 		return real_malloc_ptr(size);
 
 	current_ret_val = parameters[1];
+	in_target = false;
 	void* chunk_ptr = real_malloc_ptr(size);
 
 	// Check to see where call originated from
-	in_target = false;
-	WINFUZZ_LOG("\tParameters: %x %x %x %x %x\n", parameters[0], parameters[1], parameters[2], parameters[3], parameters[4]);
+	//WINFUZZ_LOG("\tParameters: %x %x %x %x %x\n", parameters[0], parameters[1], parameters[2], parameters[3], parameters[4]);
 	if (current_ret_val > target_code_start + target_code_size || current_ret_val < target_code_start) {
 		WINFUZZ_LOG("Rejected malloc from %x\n", current_ret_val);
 		in_target = true;
@@ -189,6 +196,7 @@ void* realloc_hook(void* mem, size_t new_size) {
 		mov[stack_pointer], ebp
 	}
 	memcpy(parameters, stack_pointer, sizeof(parameters));
+	static DWORD origin = parameters[1];
 	if (!in_target)
 		return real_realloc_ptr(mem, new_size);
 
@@ -197,8 +205,8 @@ void* realloc_hook(void* mem, size_t new_size) {
 	WINFUZZ_LOG("Target realloc of size %u returned %p (original: %p)\n", new_size, chunk_ptr, mem);
 	if (chunk_ptr != mem) {
 		// Reject calls from outside target
-		if (parameters[1] > target_code_start + target_code_size || parameters[1] < target_code_start) {
-			WINFUZZ_LOG("Rejected realloc from %x\n", parameters[1]);
+		if (origin > target_code_start + target_code_size || origin < target_code_start) {
+			WINFUZZ_LOG("Rejected realloc from %x\n", origin);
 			in_target = true;
 			return chunk_ptr;
 		}
@@ -225,22 +233,23 @@ void* __cdecl calloc_hook_no_stack(size_t count, size_t size) {
 		mov [stack_pointer], ebp
 	}
 	memcpy(parameters, stack_pointer, sizeof(parameters));
-	calloc_chunk = real_calloc_ptr(count, size);
+	static DWORD origin = parameters[1];
 	if (!in_target) {
-		return calloc_chunk;
+		return real_calloc_ptr(count, size);
 	}
 
 	// Check to see where call originated from
 	in_target = false;
-	WINFUZZ_LOG("calloc from %p returned %p (size %u)\n", parameters[1], calloc_chunk, count * size);
-	WINFUZZ_LOG("\tParameters: %x %x %x %x %x\n", parameters[0], parameters[1], parameters[2], parameters[3], parameters[4]);
-	if (parameters[1] > target_code_start + target_code_size || parameters[1] < target_code_start) {
-		WINFUZZ_LOG("Rejected calloc from %x\n", parameters[1]);
+	calloc_chunk = real_calloc_ptr(count, size);
+	WINFUZZ_LOG("calloc from %p returned %p (size %u)\n", origin, calloc_chunk, count * size);
+	//WINFUZZ_LOG("\tParameters: %x %x %x %x %x\n", parameters[0], parameters[1], parameters[2], parameters[3], parameters[4]);
+	if (origin > target_code_start + target_code_size || origin < target_code_start) {
+		WINFUZZ_LOG("Rejected calloc from %x\n", origin);
 		in_target = true;
 		return calloc_chunk;
 	}
 	else {
-		WINFUZZ_LOG("Tracking calloc from %x\n", parameters[1]);
+		WINFUZZ_LOG("Tracking calloc from %x\n", origin);
 	}
 
 	
@@ -293,16 +302,18 @@ void free_hook(void* ptr) {
 		return;
 	}
 
+	in_target = false;
 	memcpy(parameters, stack_pointer, sizeof(parameters));
+	static DWORD origin = parameters[1];
 	WINFUZZ_LOG("hooked free\n");
-	WINFUZZ_LOG("\tParameters: %x %x %x %x %x\n", parameters[0], parameters[1], parameters[2], parameters[3], parameters[4]);
+	//WINFUZZ_LOG("\tParameters: %x %x %x %x %x\n", parameters[0], parameters[1], parameters[2], parameters[3], parameters[4]);
 
 	// Check to see where call originated from
-	if (parameters[1] > target_code_start + target_code_size || parameters[1] < target_code_start) {
+	if (origin > target_code_start + target_code_size || origin < target_code_start) {
+		in_target = true;
 		return;
 	}
 
-	in_target = false;
 	int idx = malloc_chunks.find(ptr);
 
 	if (idx != -1) {
