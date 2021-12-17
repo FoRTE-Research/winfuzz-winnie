@@ -71,6 +71,7 @@
 #include <ctype.h>
 #include <fcntl.h>
 #include <conio.h>
+#include <timeapi.h>
 
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -2243,11 +2244,19 @@ char *get_test_case(long *fsize)
   return buf;
 }
 
+ULONGLONG endTickCount = 0;
+static void handle_stop_sig(int);
+
 /* Execute target application, monitoring for timeouts. Return status
    information. The called program will update trace_bits[]. */
 
 static u8 run_target(char** argv, u32 timeout) {
 	  
+    if (GetTickCount64() >= endTickCount) {
+        printf("Execution stopping after %d seconds.\n", atoi(getenv("WINFUZZ_TIMEOUT")));
+        handle_stop_sig(SIGINT);
+    }
+
   // Initialize the trace_bits  
   total_execs++;
   memset(trace_bits, 0, MAP_SIZE);
@@ -7074,6 +7083,29 @@ int getopt(int argc, char **argv, char *optstring) {
 
 /* Main entry point */
 int main(int argc, char** argv) {
+    /* Set timer resolution to lowest possible value */
+    const int TARGET_RESOLUTION = 1;   // 1-millisecond target resolution
+
+    TIMECAPS tc;
+    UINT     wTimerRes;
+
+    if (timeGetDevCaps(&tc, sizeof(TIMECAPS)) != TIMERR_NOERROR)
+    {
+        printf("Error: timeGetDevCaps failed\n");
+        return 1;
+    }
+
+    wTimerRes = min(max(tc.wPeriodMin, TARGET_RESOLUTION), tc.wPeriodMax);
+    timeBeginPeriod(wTimerRes);
+
+    char* environmentTimeout = getenv("WINFUZZ_TIMEOUT");
+    if (!environmentTimeout) {
+        printf("Error: Could not get %WINFUZZ_TIMEOUT%\n");
+    }
+
+    endTickCount = GetTickCount64() + atoi(environmentTimeout) * 1000;
+    printf("Will timeout after GetTickCount gives %llu milliseconds (environment timeout: %d)\n", endTickCount, atoi(environmentTimeout));
+
   s32 opt;
   u64 prev_queued = 0;
   u32 sync_interval_cnt = 0, seek_to;

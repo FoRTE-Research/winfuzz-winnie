@@ -754,7 +754,7 @@ __declspec(noreturn) void persistent_report_end()
 	WINFUZZ_LOG("End of iteration %u report_end\n", times_run);
 	//getc(fuzzer_stdin);
 	times_run++;
-	fuzzer_printf("Times run: %d\n", times_run);
+	//fuzzer_printf("Times run: %d\n", times_run);
 	SuspendThread(GetCurrentThread());
 	FATAL("Resumed without resetting context in persistent_report_end");
 }

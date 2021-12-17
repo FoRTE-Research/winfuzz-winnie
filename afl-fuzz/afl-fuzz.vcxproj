@@ -93,7 +93,7 @@
       <TargetMachine>MachineX86</TargetMachine>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>forklib.lib;libipt.lib;ipttool.lib;Shlwapi.lib;Pdh.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>forklib.lib;libipt.lib;ipttool.lib;Shlwapi.lib;Pdh.lib;Winmm.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(SolutionDir)intel-libipt\Win32;$(OutDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <CustomBuildStep>
@@ -115,7 +115,7 @@
       <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalDependencies>forklib.lib;libipt.lib;ipttool.lib;Shlwapi.lib;Pdh.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>forklib.lib;libipt.lib;ipttool.lib;Shlwapi.lib;Pdh.lib;Winmm.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(SolutionDir)intel-libipt\Win32;$(OutDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <CustomBuildStep>
