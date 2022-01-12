@@ -222,12 +222,6 @@ void* realloc_hook(void* mem, size_t new_size) {
 	return chunk_ptr;
 }
 
-void log_calloc(void* origin, void* r) {
-	snprintf(fmt_buf, sizeof(fmt_buf), "calloc: from %p, returned %p.\nstack is: \n\t%x\n\t%x\n\t%x\n\t%x\n\t%x\n", origin, r, parameters[0], parameters[1], parameters[2], parameters[3], parameters[4]);
-	fwrite(fmt_buf, strlen(fmt_buf), 1, log_file);
-	fflush(log_file);
-}
-
 void* __cdecl calloc_hook_no_stack(size_t count, size_t size) {
 	_asm {
 		mov [stack_pointer], ebp
@@ -260,37 +254,6 @@ void* __cdecl calloc_hook_no_stack(size_t count, size_t size) {
 	//winfuzz_fuzzer_printf("calloc returned %p (size %u)\n", calloc_chunk, count * size);
 	in_target = true;
 	return calloc_chunk;
-}
-
-__declspec(naked) void* __cdecl calloc_hook(size_t count, size_t size) {
-	_asm {
-		mov [stack_pointer], esp
-		mov [saved_eax], eax
-		pop eax
-		mov [calloc_origin], eax
-		push eax
-		mov eax, [saved_eax]
-	}
-	memcpy(parameters, stack_pointer, sizeof(parameters));
-	calloc_chunk = real_calloc_ptr(parameters[2], parameters[1]);
-	if (!in_target) {
-		_asm {
-			mov eax, [calloc_chunk]
-			ret
-		}
-	}
-
-	in_target = false;
-	log_calloc(calloc_origin, calloc_chunk);
-	if (calloc_chunk) {
-		malloc_chunks.push_back(calloc_chunk);
-	}
-	
-	in_target = true;
-	_asm {
-		mov eax, [calloc_chunk]
-		ret
-	}
 }
 
 void free_hook(void* ptr) {
