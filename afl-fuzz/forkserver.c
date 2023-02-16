@@ -80,6 +80,7 @@ void forkserver_options_init(int argc, const char *argv[])
     options.coverage_kind    = COVERAGE_BB;
     options.fuzz_harness[0]  = 0;
 	options.enable_wer       = true;
+	options.persistent_iterations = 1000000;
 	use_fork = true;
 
 	if (!SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, options.minidump_path))) {
@@ -101,7 +102,13 @@ void forkserver_options_init(int argc, const char *argv[])
 		} else if (strcmp(token, "-minidump_dir") == 0) {
 			USAGE_CHECK((i + 1) < argc, "missing directory path");
 			strncpy(options.minidump_path, argv[++i], sizeof(options.minidump_path));
-        } else {
+		} else if (strcmp(token, "-persistent_iterations") == 0) {
+			long value = atol(argv[++i]);
+			if (value < 0) {
+				FATAL("Invalid number of iterations (must be positive)\n");
+			}
+			options.persistent_iterations = (uint64_t)value;
+		} else {
             FATAL("UNRECOGNIZED FORKSERVER OPTION: \"%s\"\n", token);
         }
     }
@@ -568,6 +575,7 @@ CLIENT_ID spawn_child_with_injection(char* cmd, INJECTION_MODE injection_type, u
 	fuzzer_settings.enableWER = options.enable_wer;
 	fuzzer_settings.cpuAffinityMask = cpu_aff;
 	fuzzer_settings.debug = options.debug_mode;
+	fuzzer_settings.persistentIterations = options.persistent_iterations;
 	if (!WriteProcessMemory(child_handle, pFuzzer_settings, &fuzzer_settings, sizeof(AFL_SETTINGS), &nWritten) || nWritten < sizeof(AFL_SETTINGS))
 	{
 		dank_perror("Writing fuzzer settings into child");

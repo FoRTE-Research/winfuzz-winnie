@@ -34,6 +34,7 @@ typedef volatile struct _AFL_SETTINGS
 	BOOL enableWER; // Enable minidumps
 	BOOL debug; // Enable debugging
 	DWORD_PTR cpuAffinityMask; // Affinity mask for the forkserver. Never put the children on the same processor!
+	uint64_t persistentIterations; // Number of iterations to run before restarting process
 	char harness_name[MAX_PATH+1];
 	char minidump_path[MAX_PATH+1];
 } AFL_SETTINGS;

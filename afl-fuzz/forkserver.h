@@ -33,6 +33,7 @@ typedef struct _forkserver_option_t {
 	char minidump_path[MAX_PATH+1];
 	void *fuzz_address;
 	bool enable_wer; // enable Windows Error Reporting
+	uint64_t persistent_iterations;
 } forkserver_option_t;
 
 extern forkserver_option_t options;

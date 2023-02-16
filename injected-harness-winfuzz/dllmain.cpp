@@ -755,6 +755,10 @@ __declspec(noreturn) void persistent_report_end()
 	//getc(fuzzer_stdin);
 	times_run++;
 	//fuzzer_printf("Times run: %d\n", times_run);
+	if (times_run >= fuzzer_settings.persistentIterations) 
+	{
+		FATAL("Restarting persistent mode process");
+	}
 	SuspendThread(GetCurrentThread());
 	FATAL("Resumed without resetting context in persistent_report_end");
 }
@@ -1759,7 +1763,8 @@ DWORD CALLBACK initThreadStart(LPVOID hModule)
 	}
 
 	if (!SetProcessAffinityMask(GetCurrentProcess(), fuzzer_settings.cpuAffinityMask)) {
-		FATAL("Failed to set process affinity");
+		//FATAL("Failed to set process affinity");
+		fuzzer_printf("Failed to set process affinity. Continuing.");
 	}
 
 	// Load the harness
