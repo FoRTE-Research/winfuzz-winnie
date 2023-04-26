@@ -86,6 +86,10 @@
 #include "winaflpt.h"
 #endif
 
+static u8 correctness_mode = 0;       /* Do correctness test */
+static ULONGLONG endTickCount = 0;    /* Value of GetTickCount to quit after */
+static char* timeout_str = NULL;      /* String representing timeout in seconds, or NULL */
+
 u8* binary_name;                      /* Path to binary */
 u8 use_fullspeed = 1;                 /* We want to use fullspeed cov    */
 u8 use_intelpt = 0;                   /* We want to use intelpt cov      */
@@ -96,6 +100,8 @@ BOOL discovered_inst = FALSE;         /* Flag for the dry run            */
 char run_dryrun = 1;
 u32 queued_paths;                     /* Total number of queued testcases */
 char no_trim;
+
+state_snapshot_t last_snapshot;       /* State snapshot from last run */
 
 /* Lots of globals, but mostly for the status UI and other things where it
    really makes no sense to haul them around as function parameters. */
@@ -2244,7 +2250,6 @@ char *get_test_case(long *fsize)
   return buf;
 }
 
-ULONGLONG endTickCount = 0;
 static void handle_stop_sig(int);
 
 /* Execute target application, monitoring for timeouts. Return status
@@ -2252,7 +2257,7 @@ static void handle_stop_sig(int);
 
 static u8 run_target(char** argv, u32 timeout) {
 	  
-    if (GetTickCount64() >= endTickCount) {
+    if (timeout_str && (GetTickCount64() >= endTickCount)) {
         printf("Execution stopping after %d seconds.\n", atoi(getenv("WINFUZZ_TIMEOUT")));
         handle_stop_sig(SIGINT);
     }
@@ -2323,7 +2328,6 @@ static void write_to_testcase(void* mem, u32 len) {
   } else close(fd);
 
 }
-
 
 /* The same, but with an adjustable gap. Used for trimming. */
 
@@ -4746,6 +4750,235 @@ static u8 could_be_interest(u32 old_val, u32 new_val, u8 blen, u8 check_le) {
 
 }
 
+static u8 run_with_input(struct queue_entry* entry, char** argv) {
+	u8* use_mem;
+	u8  res;
+	s32 fd;
+
+	u8* fn = strrchr(entry->fname, '\\') + 1;
+
+	fd = open(entry->fname, O_RDONLY | O_BINARY);
+	if (fd < 0) PFATAL("Unable to open '%s'", entry->fname);
+
+	use_mem = ck_alloc_nozero(entry->len);
+
+	if (read(fd, use_mem, entry->len) != entry->len)
+		FATAL("Short read from '%s'", entry->fname);
+
+	close(fd);
+
+	write_to_testcase(use_mem, entry->len);
+
+	res = run_target(argv, exec_tmout);
+	ck_free(use_mem);
+
+	return res;
+}
+
+#define NONDETERM_CHECK_RUNS 10
+
+/* Collect determinism map for an input */
+static u8 run_entry_check_deterministic(char** argv, struct queue_entry* e, state_snapshot_t* det_map) 
+{
+    run_dryrun = 1;
+    // Collect snapshots
+    state_snapshot_t run_snapshots[NONDETERM_CHECK_RUNS];
+    for (int i = 0; i < NONDETERM_CHECK_RUNS; i++) {
+        u8 res = run_with_input(e, argv);
+        /*
+        ACTF("Raw data:");
+        for (uint64_t i = 0; i < last_snapshot.globals_size; i++) {
+            printf("%x", last_snapshot.globals_data[i]);
+        }
+        printf("\n");
+        */
+        run_snapshots[i].globals_size = last_snapshot.globals_size;
+        run_snapshots[i].globals_data = last_snapshot.globals_data;
+        // Should never happen...
+        if (run_snapshots[i].globals_size != run_snapshots[0].globals_size) FATAL("This shouldn't happen - binary section size changed");
+        if (res != 0) {
+            return res;
+        }
+    }
+    // Compare snapshots to create final determinism map
+    // If a byte at index i differs between any 2 runs, globals_data[i] = 0
+    // Else, globals_data[i] = 1
+    uint64_t num_nondet = 0;
+	for (uint64_t byte_idx = 0; byte_idx < run_snapshots[0].globals_size; byte_idx++) {
+        bool found_diff = false;
+		for (int i = 1; i < NONDETERM_CHECK_RUNS; i++) {
+			if (run_snapshots[0].globals_data[byte_idx] != run_snapshots[i].globals_data[byte_idx]) {
+                found_diff = true;
+			}
+		}
+        run_snapshots[0].globals_data[byte_idx] = found_diff;
+        if (found_diff) {
+            num_nondet++;
+        }
+	}
+    ACTF("%u nondeterministic global bytes", num_nondet, e->fname);
+    
+    det_map->globals_data = run_snapshots[0].globals_data;
+    det_map->globals_size = run_snapshots[0].globals_size;
+    // Free the others
+    for (int i = 1; i < NONDETERM_CHECK_RUNS; i++) {
+        free(run_snapshots[i].globals_data);
+    }
+
+    // Registers
+    uint64_t num_nondet_reg = 0;
+    for (uint64_t gen_reg = 0; gen_reg < NUM_REGS; gen_reg++) {
+        bool found_diff = false;
+        for (int i = 1; i < NONDETERM_CHECK_RUNS; i++) {
+            if (run_snapshots[0].gen_regs[gen_reg] != run_snapshots[i].gen_regs[gen_reg]) {
+               // ACTF("Reg %u, Run %d: %x != %x", gen_reg, i, run_snapshots[i].gen_regs[gen_reg], run_snapshots[0].gen_regs[gen_reg]);
+                found_diff = true;
+            }
+            else {
+               // ACTF("Reg %u, Run %d: %x == %x", gen_reg, i, run_snapshots[i].gen_regs[gen_reg], run_snapshots[0].gen_regs[gen_reg]);
+            }
+        }
+        run_snapshots[0].gen_regs[gen_reg] = found_diff;
+        if (found_diff) {
+            num_nondet_reg++;
+        }
+    }
+   ACTF("%u nondeterministic registers", num_nondet_reg);
+
+    memcpy(det_map->gen_regs, run_snapshots[0].gen_regs, NUM_REGS * sizeof(det_map->gen_regs[0]));
+
+    return 0;
+}
+
+static u8 run_entry_collect_state_map(char** argv, struct queue_entry* e, state_snapshot_t* state_map)
+{
+    u8 res = run_with_input(e, argv);
+    
+    state_map->globals_size = last_snapshot.globals_size;
+    state_map->globals_data = last_snapshot.globals_data;
+
+    for (int i = 0; i < NUM_REGS; i++) {
+        state_map->gen_regs[i] = last_snapshot.gen_regs[i];
+    }
+
+    return res;
+}
+
+typedef struct {
+    uint64_t global_bytes_diff;
+    bool regs_diff[NUM_REGS];
+    uint64_t num_regs_diff;
+    uint64_t total_diff_elements;
+    double percent_diff;
+} diff_report_t;
+
+/* Return a double representing percent difference between a and b */
+static void compare_snapshots(state_snapshot_t* a, state_snapshot_t* b, state_snapshot_t* det_map, diff_report_t* diff)
+{
+    // Compare globals
+    diff->global_bytes_diff = 0;
+    for (uint64_t i = 0; i < a->globals_size; i++) {
+        if ((a->globals_data[i] != b->globals_data[i]) && (!det_map->globals_data[i])) {
+            diff->global_bytes_diff++;
+        }
+    }
+    // Compare registers
+    diff->num_regs_diff = 0;
+    for (uint64_t i = 0; i < NUM_REGS; i++) {
+        diff->regs_diff[i] = false;
+        if ((a->gen_regs[i] != b->gen_regs[i]) && (!det_map->gen_regs[i])) {
+            diff->num_regs_diff++;
+            diff->regs_diff[i] = true;
+        }
+    }
+
+    diff->total_diff_elements = diff->global_bytes_diff + diff->num_regs_diff;
+   
+    double total_diff = (double)diff->global_bytes_diff + (double)diff->num_regs_diff;
+    double total_elements = (double)a->globals_size + (double)NUM_REGS;
+
+    diff->percent_diff = total_diff / total_elements;
+}
+
+/* Return true if result should be considered */
+static bool do_correctness_test_for_entry(char** argv, struct queue_entry* e, diff_report_t* diff)
+{
+    ACTF("Correctness test for %s", e->fname);
+    // Sample known good state
+    state_snapshot_t good_map;
+    u8 res = run_entry_collect_state_map(argv, e, &good_map);
+    if (res != 0) {
+        ACTF("Input %s caused error %u", e->fname, res);
+        return false;
+    }
+
+    // Check for nondeterminism and get map
+    state_snapshot_t det_map;
+    res = run_entry_check_deterministic(argv, e, &det_map);
+    if (res != 0) {
+        ACTF("Input %s caused error %u", e->fname, res);
+        return false;
+    }
+
+    // Finally, run every other queue entry, followed by e, to check
+    // for state corruption
+    run_dryrun = 0;
+    struct queue_entry* q = queue;
+    state_snapshot_t tmp_snapshot;
+    while (q) {
+        res = run_entry_collect_state_map(argv, q, &tmp_snapshot);
+        free(tmp_snapshot.globals_data);
+        if (res != 0) continue;
+        if (stop_soon) break;
+        q = q->next;
+    }
+    res = run_entry_collect_state_map(argv, e, &tmp_snapshot);
+    
+    compare_snapshots(&good_map, &tmp_snapshot, &det_map, diff);
+
+    free(good_map.globals_data);
+    free(tmp_snapshot.globals_data);
+    free(det_map.globals_data);
+    return true;
+}
+
+const char* reg_names[] = { "EAX", "ECX", "EDX", "EBX", "ESP", "EBP", "ESI", "EDI" };
+
+static void do_correctness_test(char** argv)
+{
+    struct queue_entry* q = queue;
+    diff_report_t* input_diffs = calloc(queued_paths, sizeof(diff_report_t));
+    u32 i = 0;
+    while (q) {
+        do_correctness_test_for_entry(argv, q, &input_diffs[i]);
+        if (stop_soon) return;
+        q = q->next;
+        i++;
+    }
+    ACTF("-----------------CORRECTNESS TEST RESULTS----------------------------");
+    i = 0;
+    q = queue;
+    while (q) {
+        ACTF("%s: %.2f%% difference (%u elements)", q->fname, input_diffs[i].percent_diff, input_diffs[i].total_diff_elements);
+        if (input_diffs[i].total_diff_elements != 0) {
+            if (input_diffs[i].global_bytes_diff != 0) {
+                WARNF("Differing global bytes: %u", input_diffs[i].global_bytes_diff);
+            }
+            if (input_diffs[i].num_regs_diff != 0) {
+                WARNF("Differing registers:");
+                for (int i = 0; i < NUM_REGS; i++) {
+                    if (input_diffs[i].regs_diff[i]) {
+                        printf("\t\t%s\n", reg_names[i]);
+                    }
+                }
+            }
+        }
+
+        q = q->next;
+        i++;
+    }
+    free(input_diffs);
+}
 
 /* Take the current entry from the queue, fuzz it for a while. This
    function is a tad too long... returns 0 if fuzzed successfully, 1 if
@@ -7098,13 +7331,15 @@ int main(int argc, char** argv) {
     wTimerRes = min(max(tc.wPeriodMin, TARGET_RESOLUTION), tc.wPeriodMax);
     timeBeginPeriod(wTimerRes);
 
-    char* environmentTimeout = getenv("WINFUZZ_TIMEOUT");
-    if (!environmentTimeout) {
-        printf("Error: Could not get %WINFUZZ_TIMEOUT%\n");
+    timeout_str = getenv("WINFUZZ_TIMEOUT");
+    if (atoi(timeout_str) <= 0) {
+        printf("Incorrect format for %WINFUZZ_TIMEOUT%\n");
+        timeout_str = NULL;
     }
-
-    endTickCount = GetTickCount64() + atoi(environmentTimeout) * 1000;
-    printf("Will timeout after GetTickCount gives %llu milliseconds (environment timeout: %d)\n", endTickCount, atoi(environmentTimeout));
+    else {
+        endTickCount = GetTickCount64() + atoi(timeout_str) * 1000;
+        printf("Will timeout after GetTickCount gives %llu milliseconds (environment timeout: %d)\n", endTickCount, atoi(timeout_str));
+    }
 
   s32 opt;
   u64 prev_queued = 0;
@@ -7130,7 +7365,7 @@ int main(int argc, char** argv) {
   in_dir = NULL;
   out_dir = NULL;
 
-  while ((opt = getopt(argc, argv, "+i:o:f:m:t:I:T:dnCB:S:M:x:Pc:")) > 0)
+  while ((opt = getopt(argc, argv, "+i:o:f:m:t:I:T:dnCB:S:M:x:Pc:Z")) > 0)
 
     switch (opt) {
       case 'i':
@@ -7316,6 +7551,11 @@ int main(int argc, char** argv) {
 
         break;
 
+      case 'Z':
+          printf("Correctness mode.\n");
+          correctness_mode = true;
+          break;
+
       default:
         usage(argv[0]);
     }
@@ -7340,7 +7580,7 @@ int main(int argc, char** argv) {
 	  optind += pt_options;
 #endif
   } else if(use_fullspeed) { 
-    int fullspeed_options = fullspeed_init(argc - optind, argv + optind);    
+    int fullspeed_options = fullspeed_init(argc - optind, argv + optind, correctness_mode);    
     if (!fullspeed_options) usage(argv[0]);
     optind += fullspeed_options;
   } else {
@@ -7411,6 +7651,12 @@ int main(int argc, char** argv) {
   
   if (use_fullspeed) {
 	ACTF("Using fullspeed (fault-based) instrumentation.");
+  }
+
+  if (correctness_mode) {
+      ACTF("Performing correctness test.");
+      do_correctness_test(use_argv);
+      goto stop_fuzzing;
   }
 
   perform_dry_run(use_argv);

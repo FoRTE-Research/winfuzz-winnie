@@ -12,6 +12,8 @@ static unsigned long timesRun = 0;
 Vector<SectionCopy> sectionCopies = {};
 Vector<char*> trackedDlls = {};
 
+static FILE* c_log_file = NULL;
+
 #define USER_SEGHANDLE
 
 // WinFuzz functions
@@ -689,8 +691,98 @@ extern "C" {
 	void(*report_end)(); // noreturn
 }
 
+static state_snapshot_t state_snapshot;
+// Space for storing global data in snapshot
+static uint8_t* globals_storage = NULL;
+
+#define CLOG(...) fprintf(c_log_file, ##__VA_ARGS__##)
+
+// Pain
+static DWORD tmpEax = NULL;
+static DWORD tmpEcx = NULL;
+static DWORD tmpEdx = NULL;
+static DWORD tmpEbx = NULL;
+static DWORD tmpEsp = NULL;
+static DWORD tmpEbp = NULL;
+static DWORD tmpEsi = NULL;
+static DWORD tmpEdi = NULL;
+static void make_snapshot()
+{
+	/*
+	 *	Registers
+	 */
+	_asm {
+		mov[tmpEax], eax;
+		mov[tmpEax], ecx;
+		mov[tmpEax], edx;
+		mov[tmpEax], ebx;
+		mov[tmpEax], esp;
+		mov[tmpEax], ebp;
+		mov[tmpEax], esi;
+		mov[tmpEax], edi;
+	}
+	state_snapshot.gen_regs[EAX] = tmpEax;
+	state_snapshot.gen_regs[ECX] = tmpEcx;
+	state_snapshot.gen_regs[EDX] = tmpEdx;
+	state_snapshot.gen_regs[EBX] = tmpEbx;
+	state_snapshot.gen_regs[ESP] = tmpEsp;
+	state_snapshot.gen_regs[EBP] = tmpEbp;
+	state_snapshot.gen_regs[ESI] = tmpEsi;
+	state_snapshot.gen_regs[EDI] = tmpEdi;
+	
+	// Open log file TODO delete this
+	char* logfile_name = (char*)calloc(128, sizeof(char));
+	snprintf(logfile_name, 128, "winfuzz_log_%lu.txt", GetCurrentProcessId());
+	c_log_file = fopen(logfile_name, "w");
+	free(logfile_name);
+	CLOG("Making snapshot\n");
+	/*
+	 *	Globals
+	 */
+	char* base = (char*)getExeBase();
+	PIMAGE_NT_HEADERS ntHeaders = (PIMAGE_NT_HEADERS)((PCHAR)base + ((PIMAGE_DOS_HEADER)base)->e_lfanew);
+	PIMAGE_SECTION_HEADER section = IMAGE_FIRST_SECTION(ntHeaders);
+	// Make storage if it doesn't exist
+	if (globals_storage == NULL) {
+		uint64_t numPages = 0;
+		for (ULONG i = 0; i < ntHeaders->FileHeader.NumberOfSections; i++)
+		{
+			if (section[i].Characteristics & IMAGE_SCN_MEM_WRITE)
+			{
+				numPages += (section[i].Misc.VirtualSize + sizeof(Page) - 1) / sizeof(Page);
+			}
+		}
+		state_snapshot.globals_size = sizeof(Page) * numPages;
+		CLOG("Global bytes: %lu\n", state_snapshot.globals_size);
+		globals_storage = (uint8_t*)malloc(state_snapshot.globals_size);
+		CLOG("Allocated new global section at %p\n", globals_storage);
+	}
+	uint64_t pageIdx = 0;
+	uint64_t globals_index = 0;
+	for (ULONG i = 0; i < ntHeaders->FileHeader.NumberOfSections; i++)
+	{
+		if (section[i].Characteristics & IMAGE_SCN_MEM_WRITE)
+		{
+			char* startOfSection = base + section[i].VirtualAddress;
+			unsigned pagesToCopy = (section[i].Misc.VirtualSize + sizeof(Page) - 1) / sizeof(Page);
+			unsigned pagesCopied = 0;
+
+			memcpy(globals_storage + globals_index, startOfSection, pagesToCopy * sizeof(Page));
+			globals_index += pagesToCopy * sizeof(Page);
+		}
+	}
+	state_snapshot.globals_data = globals_storage;
+
+	fclose(c_log_file);
+}
+
 __declspec(noreturn) void afl_report_end()
 {
+	// Take snapshot for correctness mode
+	if (fuzzer_settings.enable_correctness_mode) {
+		make_snapshot();
+		fuzzer_settings.last_snapshot = &state_snapshot;
+	}
 	//trace_printf("ipc to the forkserver to tell them we finished\n");
 	// ipc to the forkserver to tell him we finished.
 	AFL_FORKSERVER_RESULT aflResponse;
@@ -722,14 +814,12 @@ __declspec(noreturn) void fork_report_end()
 __declspec(noreturn) void persistent_report_end()
 {
 	in_target = false;
-	AFL_PERSISTENT_RESULT aflResponse;
-	aflResponse.StatusCode = AFL_CHILD_SUCCESS;
-	DWORD nWritten;
-	if (!WriteFile(hPipeAfl, &aflResponse, sizeof(aflResponse), &nWritten, NULL) || nWritten != sizeof(aflResponse))
-	{
-		FATAL("Broken AFL pipe, WriteFile (child_end)");
+	// Take snapshot for correctness mode
+	if (fuzzer_settings.enable_correctness_mode) {
+		make_snapshot();
+		fuzzer_settings.last_snapshot = &state_snapshot;
 	}
-	debug_printf("Okay, suspending the current thread.\n");
+	//fuzzer_printf("Beginning of report end\n");
 	WINFUZZ_LOG("Beginning of iteration %u report_end\n", times_run);
 	WINFUZZ_LOG("Target start: %x size: %x\n", target_code_start, target_code_size);
 	// Clear vectors and free
@@ -751,6 +841,7 @@ __declspec(noreturn) void persistent_report_end()
 	heap_alloc_chunks.clear();
 	malloc_chunks.clear();
 	virtual_alloc_chunks.clear();
+
 	WINFUZZ_LOG("End of iteration %u report_end\n", times_run);
 	//getc(fuzzer_stdin);
 	times_run++;
@@ -758,6 +849,16 @@ __declspec(noreturn) void persistent_report_end()
 	if (times_run >= fuzzer_settings.persistentIterations) 
 	{
 		FATAL("Restarting persistent mode process");
+	}
+	debug_printf("Okay, suspending the current thread.\n");
+	// Careful here - the fuzzer assumes it's safe to reset your thread's context as soon as it reads
+	// this result on the pipe
+	AFL_PERSISTENT_RESULT aflResponse;
+	aflResponse.StatusCode = AFL_CHILD_SUCCESS;
+	DWORD nWritten;
+	if (!WriteFile(hPipeAfl, &aflResponse, sizeof(aflResponse), &nWritten, NULL) || nWritten != sizeof(aflResponse))
+	{
+		FATAL("Broken AFL pipe, WriteFile (child_end)");
 	}
 	SuspendThread(GetCurrentThread());
 	FATAL("Resumed without resetting context in persistent_report_end");
@@ -800,7 +901,7 @@ void afl_report_coverage(uintptr_t ip, breakpoint_t bp)
 	aflResponse.StatusCode = AFL_CHILD_COVERAGE;
 	aflResponse.CoverageInfo.Rva = ip - (uintptr_t)bp.hModule;
 	strncpy(aflResponse.CoverageInfo.ModuleName, get_module_filename(bp.hModule), sizeof(aflResponse.CoverageInfo.ModuleName));
-	debug_printf("* %s+%p\n", aflResponse.CoverageInfo.ModuleName, aflResponse.CoverageInfo.Rva);
+	//debug_printf("* %s+%p\n", aflResponse.CoverageInfo.ModuleName, aflResponse.CoverageInfo.Rva);
 	if (!WriteFile(hPipeAfl, &aflResponse, sizeof(aflResponse), &nWritten, NULL) || nWritten != sizeof(aflResponse))
 	{
 		FATAL("Broken AFL pipe, WriteFile");
@@ -959,7 +1060,7 @@ LONG WINAPI BreakpointHandler(EXCEPTION_POINTERS *ExceptionInfo)
 			}
 			else
 			{
-				debug_printf("Covered basicblock %p\n", ip);
+				//debug_printf("Covered basicblock %p\n", ip);
 				breakpoint_t bp = RestoreBreakpoint(ip);
 				report_coverage((uintptr_t)ip, bp);
 
@@ -975,7 +1076,7 @@ LONG WINAPI BreakpointHandler(EXCEPTION_POINTERS *ExceptionInfo)
 				}
 			}
 			//trace_printf("Exit3 %d\n", handlerReentrancy);
-			debug_printf("Decrement 952");
+			//debug_printf("Decrement 952");
 			InterlockedDecrement(&handlerReentrancy);
 			in_target = true;
 			return EXCEPTION_CONTINUE_EXECUTION;
@@ -1745,6 +1846,13 @@ DWORD CALLBACK initThreadStart(LPVOID hModule)
 	fuzzer_printf("WinFuzz PID: %d\n", pid);
 	snprintf(afl_pipe, sizeof(afl_pipe), AFL_FORKSERVER_PIPE "-%d", pid);
 	debug_printf("afl_pipe: %s\n", afl_pipe);
+	
+	if (fuzzer_settings.enable_correctness_mode) {
+		fuzzer_settings.last_snapshot = &state_snapshot;
+		fuzzer_printf("Correctness mode is enabled\n");
+		fuzzer_printf("&state_snapshot = %p, globals_storage = %p\n", &state_snapshot, globals_storage);
+		fuzzer_printf("&fuzzer_settings = %p\n", &fuzzer_settings);
+	}
 
 	SYSTEM_INFO sys_info = { 0 };
 	GetSystemInfo(&sys_info);

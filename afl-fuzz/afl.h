@@ -1,4 +1,5 @@
 #pragma once
+#include "../forkserver-proto.h"
 
 /* Execution status fault codes */
 
@@ -38,6 +39,8 @@ extern u64 total_execs;
 
 extern char *fuzzer_id;
 extern struct winafl_breakpoint *breakpoints;
+
+extern state_snapshot_t last_snapshot;
 
 char *argv_to_cmd(char** argv);
 char *alloc_printf(const char *_str, ...);

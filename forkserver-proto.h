@@ -26,6 +26,31 @@ typedef enum _INJECTION_MODE
 	PERSISTENT,
 } INJECTION_MODE;
 
+typedef enum _REG_TYPE
+{
+	EAX,
+	ECX,
+	EDX,
+	EBX,
+	ESP,
+	EBP,
+	ESI,
+	EDI,
+	NUM_REGS
+} GEN_REG;
+
+typedef volatile struct _state_snapshot_t
+{
+	// Globals
+	uint64_t globals_size;
+	uint8_t* globals_data;
+	// Registers
+	// eax, ecx, edx, ebx, esp, ebp, esi, edi
+	DWORD gen_regs[NUM_REGS];
+	DWORD eflags;
+	uint8_t xsave_data[4096];
+} state_snapshot_t;
+
 typedef volatile struct _AFL_SETTINGS
 {
 	uint32_t timeout;
@@ -37,6 +62,8 @@ typedef volatile struct _AFL_SETTINGS
 	uint64_t persistentIterations; // Number of iterations to run before restarting process
 	char harness_name[MAX_PATH+1];
 	char minidump_path[MAX_PATH+1];
+	uint8_t enable_correctness_mode;
+	state_snapshot_t* last_snapshot;
 } AFL_SETTINGS;
 
 typedef enum _FORKSERVER_STATE

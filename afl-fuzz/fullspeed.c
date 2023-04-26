@@ -52,7 +52,7 @@ static void fullspeed_options_init(int argc, const char** argv) {
 }
 
 // Main fullspeed/forkserver init entrypoint
-int fullspeed_init(int argc, char **argv) {
+int fullspeed_init(int argc, char **argv, u8 run_correctness_mode) {
 	watchdog_enabled = false;
 
 	int last_fullspeed_option = -1;
@@ -74,7 +74,7 @@ int fullspeed_init(int argc, char **argv) {
 	}
 	if (lastoption <= 0) return 0;
 
-	forkserver_options_init(lastoption - last_fullspeed_option - 1, argv + last_fullspeed_option + 1);
+	forkserver_options_init(lastoption - last_fullspeed_option - 1, argv + last_fullspeed_option + 1, run_correctness_mode);
 
 	return lastoption;
 }
@@ -134,7 +134,6 @@ static int run_target_fullspeed_fork(char **argv, uint32_t timeout, uint32_t ini
 // Persistent mode.
 static int run_target_fullspeed_persistent(char **argv, uint32_t timeout, uint32_t init_timeout, int drun) {
 	int ret = -1, ret_status = -1;
-
 	if (drun == 1) {
 		// Dry run
 		arm_watchdog_timer((init_timeout + timeout) * 2);

@@ -67,7 +67,7 @@ static volatile HANDLE hPipeChild;
 void load_bbs();
 
 // Parse options from the command line
-void forkserver_options_init(int argc, const char *argv[])
+void forkserver_options_init(int argc, const char *argv[], u8 run_correctness_mode)
 {
 	child_handle = NULL;
 	child_thread_handle = NULL;
@@ -81,6 +81,7 @@ void forkserver_options_init(int argc, const char *argv[])
     options.fuzz_harness[0]  = 0;
 	options.enable_wer       = true;
 	options.persistent_iterations = 1000000;
+	options.enable_correctness_mode = run_correctness_mode;
 	use_fork = true;
 
 	if (!SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, options.minidump_path))) {
@@ -394,6 +395,30 @@ void kill_process() {
 
 #define FORKSERVER_DLL "injected-harness-winfuzz.dll"
 
+static void read_snapshot() {
+	AFL_SETTINGS cur_fuzzer_settings;
+	if (ReadProcessMemory(child_handle, pFuzzer_settings, &cur_fuzzer_settings, sizeof(AFL_SETTINGS), NULL) == 0)
+	{
+		FATAL("Failed to read fuzzer settings from %p", pFuzzer_settings);
+	}
+	//ACTF("Read fuzzer settings at %p (&last_snapshot = %p)", pFuzzer_settings, cur_fuzzer_settings.last_snapshot);
+	state_snapshot_t cur_snapshot;
+	if (ReadProcessMemory(child_handle, cur_fuzzer_settings.last_snapshot, &cur_snapshot, sizeof(state_snapshot_t), NULL) == 0)
+	{
+		FATAL("Failed to read snapshot from %p", cur_fuzzer_settings.last_snapshot);
+	}
+	//ACTF("Read snapshot at %p", cur_fuzzer_settings.last_snapshot);
+	// Overwrite previous snapshot in global variable - assume it was copied if needed
+	last_snapshot.globals_size = cur_snapshot.globals_size;
+	last_snapshot.globals_data = malloc(cur_snapshot.globals_size);
+	if (ReadProcessMemory(child_handle, cur_snapshot.globals_data, last_snapshot.globals_data, cur_snapshot.globals_size, NULL) == 0)
+	{
+		FATAL("Failed to read snapshot globals from %p", cur_snapshot.globals_data);
+	}
+	// Registers
+	memcpy(last_snapshot.gen_regs, cur_snapshot.gen_regs, NUM_REGS * sizeof(last_snapshot.gen_regs[0]));
+}
+
 int get_child_result()
 {
 	AFL_FORKSERVER_RESULT forkserverResult;
@@ -411,6 +436,10 @@ int get_child_result()
 		}
 		// trace_printf("Forkserver result: %d\n", forkserverResult.StatusCode);
 	} while (forkserverResult.StatusCode == AFL_CHILD_COVERAGE);
+
+	if (options.enable_correctness_mode) {
+		read_snapshot();
+	}
 
 	switch (forkserverResult.StatusCode)
 	{
@@ -576,6 +605,8 @@ CLIENT_ID spawn_child_with_injection(char* cmd, INJECTION_MODE injection_type, u
 	fuzzer_settings.cpuAffinityMask = cpu_aff;
 	fuzzer_settings.debug = options.debug_mode;
 	fuzzer_settings.persistentIterations = options.persistent_iterations;
+	fuzzer_settings.enable_correctness_mode = options.enable_correctness_mode;
+	fuzzer_settings.last_snapshot = NULL;
 	if (!WriteProcessMemory(child_handle, pFuzzer_settings, &fuzzer_settings, sizeof(AFL_SETTINGS), &nWritten) || nWritten < sizeof(AFL_SETTINGS))
 	{
 		dank_perror("Writing fuzzer settings into child");
@@ -802,6 +833,8 @@ int run_with_persistent() {
 
 	AFL_PERSISTENT_RESULT persistentResult;
 	read_result_persistent(&persistentResult); // it SHOULD self-suspend at report_ends
-	WaitForSingleObject(child_thread_handle, 1); // ???
+	if (options.enable_correctness_mode) {
+		read_snapshot();
+	}
 	return get_ret_val_persistent(persistentResult.StatusCode);
 }

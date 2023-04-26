@@ -34,6 +34,7 @@ typedef struct _forkserver_option_t {
 	void *fuzz_address;
 	bool enable_wer; // enable Windows Error Reporting
 	uint64_t persistent_iterations;
+	uint8_t enable_correctness_mode;
 } forkserver_option_t;
 
 extern forkserver_option_t options;
