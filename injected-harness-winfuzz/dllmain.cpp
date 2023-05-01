@@ -695,7 +695,7 @@ static state_snapshot_t state_snapshot;
 // Space for storing global data in snapshot
 static uint8_t* globals_storage = NULL;
 
-#define CLOG(...) fprintf(c_log_file, ##__VA_ARGS__##)
+//#define CLOG(...) fprintf(c_log_file, ##__VA_ARGS__##)
 
 // Pain
 static DWORD tmpEax = NULL;
@@ -731,11 +731,13 @@ static void make_snapshot()
 	state_snapshot.gen_regs[EDI] = tmpEdi;
 	
 	// Open log file TODO delete this
+	/*
 	char* logfile_name = (char*)calloc(128, sizeof(char));
 	snprintf(logfile_name, 128, "winfuzz_log_%lu.txt", GetCurrentProcessId());
 	c_log_file = fopen(logfile_name, "w");
 	free(logfile_name);
 	CLOG("Making snapshot\n");
+	*/
 	/*
 	 *	Globals
 	 */
@@ -753,9 +755,9 @@ static void make_snapshot()
 			}
 		}
 		state_snapshot.globals_size = sizeof(Page) * numPages;
-		CLOG("Global bytes: %lu\n", state_snapshot.globals_size);
-		globals_storage = (uint8_t*)malloc(state_snapshot.globals_size);
-		CLOG("Allocated new global section at %p\n", globals_storage);
+		//CLOG("Global bytes: %lu\n", state_snapshot.globals_size);
+		globals_storage = (uint8_t*)real_malloc_ptr(state_snapshot.globals_size);
+		//CLOG("Allocated new global section at %p\n", globals_storage);
 	}
 	uint64_t pageIdx = 0;
 	uint64_t globals_index = 0;
@@ -773,7 +775,7 @@ static void make_snapshot()
 	}
 	state_snapshot.globals_data = globals_storage;
 
-	fclose(c_log_file);
+	//fclose(c_log_file);
 }
 
 __declspec(noreturn) void afl_report_end()

@@ -4776,6 +4776,8 @@ static u8 run_with_input(struct queue_entry* entry, char** argv) {
 }
 
 #define NONDETERM_CHECK_RUNS 10
+// Bytes around each value to mark as nondeterministic
+#define NONDETERM_MULTIBYTE_WIDTH 32
 
 /* Collect determinism map for an input */
 static u8 run_entry_check_deterministic(char** argv, struct queue_entry* e, state_snapshot_t* det_map) 
@@ -4843,7 +4845,7 @@ static u8 run_entry_check_deterministic(char** argv, struct queue_entry* e, stat
             num_nondet_reg++;
         }
     }
-   ACTF("%u nondeterministic registers", num_nondet_reg);
+    ACTF("%u nondeterministic registers", num_nondet_reg);
 
     memcpy(det_map->gen_regs, run_snapshots[0].gen_regs, NUM_REGS * sizeof(det_map->gen_regs[0]));
 
@@ -4864,6 +4866,52 @@ static u8 run_entry_collect_state_map(char** argv, struct queue_entry* e, state_
     return res;
 }
 
+/*
+// SLL for tracking differing bytes
+typedef struct {
+    void* addr;
+    u8 expected;
+    u8 found;
+    diff_entry_t* next;
+} diff_entry_t;
+
+typedef struct {
+    diff_entry_t* first;
+    diff_entry_t* last;
+} diff_entry_list;
+
+static void free_diff_list(diff_entry_list* t) 
+{
+    diff_entry_t* cur_entry = t->first;
+    while (cur_entry) {
+        diff_entry_t* freed = cur_entry;
+        cur_entry = cur_entry->next;
+        free(freed);
+    }
+    free(t);
+}
+
+static void init_diff_list(diff_entry_list* list)
+{
+    list->first = NULL;
+    list->last = NULL;
+}
+
+static void add_diff_entry(diff_entry_list* list, diff_entry_t* added)
+{
+    if (list->first) {
+        list->first = added;
+        list->last = added;
+        added->next = NULL;
+    }
+    else {
+        list->last->next = added;
+        list->last = added;
+        added->next = NULL;
+    }
+}
+*/
+
 typedef struct {
     uint64_t global_bytes_diff;
     bool regs_diff[NUM_REGS];
@@ -4872,6 +4920,21 @@ typedef struct {
     double percent_diff;
 } diff_report_t;
 
+/* True if byte in det_map at index has a nearby byte that was marked as nondeterministic */
+static int64_t has_nondeterministic_neighbor(uint8_t* det_map, uint64_t size, uint64_t index)
+{
+    for (uint64_t i = 0; i < NONDETERM_MULTIBYTE_WIDTH * 2 + 1; i++) {
+        int64_t checked_index = index + i - NONDETERM_MULTIBYTE_WIDTH;
+        if (checked_index < 0)
+            continue;
+        if (checked_index > size)
+            break;
+        if (det_map[checked_index])
+            return i - NONDETERM_MULTIBYTE_WIDTH;
+    }
+    return 0;
+}
+
 /* Return a double representing percent difference between a and b */
 static void compare_snapshots(state_snapshot_t* a, state_snapshot_t* b, state_snapshot_t* det_map, diff_report_t* diff)
 {
@@ -4879,7 +4942,14 @@ static void compare_snapshots(state_snapshot_t* a, state_snapshot_t* b, state_sn
     diff->global_bytes_diff = 0;
     for (uint64_t i = 0; i < a->globals_size; i++) {
         if ((a->globals_data[i] != b->globals_data[i]) && (!det_map->globals_data[i])) {
-            diff->global_bytes_diff++;
+            ACTF("Byte at %u differs: %x != %x", i, a->globals_data[i], b->globals_data[i]);
+            int64_t nondet_neighbor = has_nondeterministic_neighbor(det_map->globals_data, det_map->globals_size, i);
+            if (nondet_neighbor != 0) {
+                ACTF("\tBut the byte %d bytes away is nondeterministic", nondet_neighbor);
+            }
+            else {
+                diff->global_bytes_diff++;
+            }
         }
     }
     // Compare registers
