@@ -4935,19 +4935,18 @@ static int64_t has_nondeterministic_neighbor(uint8_t* det_map, uint64_t size, ui
     return 0;
 }
 
+const char* reg_names[] = { "EAX", "ECX", "EDX", "EBX", "ESP", "EBP", "ESI", "EDI" };
+
 /* Return a double representing percent difference between a and b */
 static void compare_snapshots(state_snapshot_t* a, state_snapshot_t* b, state_snapshot_t* det_map, diff_report_t* diff)
 {
     // Compare globals
     diff->global_bytes_diff = 0;
     for (uint64_t i = 0; i < a->globals_size; i++) {
-        if ((a->globals_data[i] != b->globals_data[i]) && (!det_map->globals_data[i])) {
-            ACTF("Byte at %u differs: %x != %x", i, a->globals_data[i], b->globals_data[i]);
+        if ((a->globals_data[i] != b->globals_data[i])) {
             int64_t nondet_neighbor = has_nondeterministic_neighbor(det_map->globals_data, det_map->globals_size, i);
-            if (nondet_neighbor != 0) {
-                ACTF("\tBut the byte %d bytes away is nondeterministic", nondet_neighbor);
-            }
-            else {
+            if (det_map->globals_data[i] == 0 && nondet_neighbor == 0) {
+                printf("Byte at %llu differs: %d != %d\n", i, a->globals_data[i], b->globals_data[i]);
                 diff->global_bytes_diff++;
             }
         }
@@ -4957,6 +4956,7 @@ static void compare_snapshots(state_snapshot_t* a, state_snapshot_t* b, state_sn
     for (uint64_t i = 0; i < NUM_REGS; i++) {
         diff->regs_diff[i] = false;
         if ((a->gen_regs[i] != b->gen_regs[i]) && (!det_map->gen_regs[i])) {
+            printf("\t%s is incorrect (%x != %x)\n", reg_names[i], a->gen_regs[i], b->gen_regs[i]);
             diff->num_regs_diff++;
             diff->regs_diff[i] = true;
         }
@@ -5012,8 +5012,6 @@ static bool do_correctness_test_for_entry(char** argv, struct queue_entry* e, di
     return true;
 }
 
-const char* reg_names[] = { "EAX", "ECX", "EDX", "EBX", "ESP", "EBP", "ESI", "EDI" };
-
 static void do_correctness_test(char** argv)
 {
     struct queue_entry* q = queue;
@@ -5032,13 +5030,13 @@ static void do_correctness_test(char** argv)
         ACTF("%s: %.2f%% difference (%u elements)", q->fname, input_diffs[i].percent_diff, input_diffs[i].total_diff_elements);
         if (input_diffs[i].total_diff_elements != 0) {
             if (input_diffs[i].global_bytes_diff != 0) {
-                WARNF("Differing global bytes: %u", input_diffs[i].global_bytes_diff);
+                WARNF("Differing global bytes: %llu", input_diffs[i].global_bytes_diff);
             }
             if (input_diffs[i].num_regs_diff != 0) {
-                WARNF("Differing registers:");
-                for (int i = 0; i < NUM_REGS; i++) {
-                    if (input_diffs[i].regs_diff[i]) {
-                        printf("\t\t%s\n", reg_names[i]);
+                WARNF("Differing registers (%llu):", input_diffs[i].num_regs_diff);
+                for (int reg = 0; reg < NUM_REGS; reg++) {
+                    if (input_diffs[i].regs_diff[reg]) {
+                        printf("\t\t%s\n", reg_names[reg]);
                     }
                 }
             }

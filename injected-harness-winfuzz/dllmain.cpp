@@ -713,13 +713,13 @@ static void make_snapshot()
 	 */
 	_asm {
 		mov[tmpEax], eax;
-		mov[tmpEax], ecx;
-		mov[tmpEax], edx;
-		mov[tmpEax], ebx;
-		mov[tmpEax], esp;
-		mov[tmpEax], ebp;
-		mov[tmpEax], esi;
-		mov[tmpEax], edi;
+		mov[tmpEcx], ecx;
+		mov[tmpEdx], edx;
+		mov[tmpEbx], ebx;
+		mov[tmpEsp], esp;
+		mov[tmpEbp], ebp;
+		mov[tmpEsi], esi;
+		mov[tmpEdi], edi;
 	}
 	state_snapshot.gen_regs[EAX] = tmpEax;
 	state_snapshot.gen_regs[ECX] = tmpEcx;
@@ -780,6 +780,7 @@ static void make_snapshot()
 
 __declspec(noreturn) void afl_report_end()
 {
+	in_target = false;
 	// Take snapshot for correctness mode
 	if (fuzzer_settings.enable_correctness_mode) {
 		make_snapshot();
@@ -1485,7 +1486,7 @@ extern "C" _declspec(noreturn) void harness_main()
 
 	// WinFuzz - copy mutable sections
 	copyMutableSections();
-
+	in_target = false;
 	if (fuzzer_settings.mode == PERSISTENT)
 	{
 		attachDetour(&(PVOID&)real_malloc_ptr, malloc_hook, "Malloc");
@@ -1503,7 +1504,7 @@ extern "C" _declspec(noreturn) void harness_main()
 	// Place to put guard handler
 	install_guard_handler();
 
-	in_target = false;
+	
 	install_breakpoints();
 	// Restore target hook stolen bytes
 	PatchCode(target_address, targetStolenBytes, TRAMPOLINE_SIZE, NULL);
