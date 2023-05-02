@@ -1504,8 +1504,9 @@ extern "C" _declspec(noreturn) void harness_main()
 	// Place to put guard handler
 	install_guard_handler();
 
-	
-	install_breakpoints();
+	if (!fuzzer_settings.enable_correctness_mode) {
+		install_breakpoints();
+	}
 	// Restore target hook stolen bytes
 	PatchCode(target_address, targetStolenBytes, TRAMPOLINE_SIZE, NULL);
 

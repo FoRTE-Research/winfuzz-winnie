@@ -4777,7 +4777,7 @@ static u8 run_with_input(struct queue_entry* entry, char** argv) {
 
 #define NONDETERM_CHECK_RUNS 10
 // Bytes around each value to mark as nondeterministic
-#define NONDETERM_MULTIBYTE_WIDTH 32
+#define NONDETERM_MULTIBYTE_WIDTH 8
 
 /* Collect determinism map for an input */
 static u8 run_entry_check_deterministic(char** argv, struct queue_entry* e, state_snapshot_t* det_map) 
@@ -4866,52 +4866,6 @@ static u8 run_entry_collect_state_map(char** argv, struct queue_entry* e, state_
     return res;
 }
 
-/*
-// SLL for tracking differing bytes
-typedef struct {
-    void* addr;
-    u8 expected;
-    u8 found;
-    diff_entry_t* next;
-} diff_entry_t;
-
-typedef struct {
-    diff_entry_t* first;
-    diff_entry_t* last;
-} diff_entry_list;
-
-static void free_diff_list(diff_entry_list* t) 
-{
-    diff_entry_t* cur_entry = t->first;
-    while (cur_entry) {
-        diff_entry_t* freed = cur_entry;
-        cur_entry = cur_entry->next;
-        free(freed);
-    }
-    free(t);
-}
-
-static void init_diff_list(diff_entry_list* list)
-{
-    list->first = NULL;
-    list->last = NULL;
-}
-
-static void add_diff_entry(diff_entry_list* list, diff_entry_t* added)
-{
-    if (list->first) {
-        list->first = added;
-        list->last = added;
-        added->next = NULL;
-    }
-    else {
-        list->last->next = added;
-        list->last = added;
-        added->next = NULL;
-    }
-}
-*/
-
 typedef struct {
     uint64_t global_bytes_diff;
     bool regs_diff[NUM_REGS];
@@ -4974,17 +4928,20 @@ static void compare_snapshots(state_snapshot_t* a, state_snapshot_t* b, state_sn
 static bool do_correctness_test_for_entry(char** argv, struct queue_entry* e, diff_report_t* diff)
 {
     ACTF("Correctness test for %s", e->fname);
-    // Sample known good state
-    state_snapshot_t good_map;
-    u8 res = run_entry_collect_state_map(argv, e, &good_map);
+
+    // Check for nondeterminism and get map
+    run_dryrun = 1;
+    state_snapshot_t det_map;
+    u8 res = run_entry_check_deterministic(argv, e, &det_map);
     if (res != 0) {
         ACTF("Input %s caused error %u", e->fname, res);
         return false;
     }
 
-    // Check for nondeterminism and get map
-    state_snapshot_t det_map;
-    res = run_entry_check_deterministic(argv, e, &det_map);
+    // Sample known good state
+    run_dryrun = 0;
+    state_snapshot_t good_map;
+    res = run_entry_collect_state_map(argv, e, &good_map);
     if (res != 0) {
         ACTF("Input %s caused error %u", e->fname, res);
         return false;
@@ -4992,7 +4949,6 @@ static bool do_correctness_test_for_entry(char** argv, struct queue_entry* e, di
 
     // Finally, run every other queue entry, followed by e, to check
     // for state corruption
-    run_dryrun = 0;
     struct queue_entry* q = queue;
     state_snapshot_t tmp_snapshot;
     while (q) {
