@@ -4784,15 +4784,6 @@ const char* reg_names[] = { "EAX", "ECX", "EDX", "EBX", "ESP", "EBP", "ESI", "ED
 /* Collect determinism map for an input */
 static u8 run_entry_check_deterministic(char** argv, struct queue_entry* e, state_snapshot_t* det_map) 
 {
-    ACTF("Checking determinism for: ");
-    char** cur_argv = argv;
-    while (*cur_argv) {
-        printf("%s ", *cur_argv);
-        cur_argv++;
-    }
-    printf("\n");
-    printf("queue entry: %p\n", e);
-    printf("state snapshot: %p\n", det_map);
     run_dryrun = 1;
     // Collect snapshots
     state_snapshot_t run_snapshots[NONDETERM_CHECK_RUNS];
@@ -4805,8 +4796,7 @@ static u8 run_entry_check_deterministic(char** argv, struct queue_entry* e, stat
         }
         printf("\n");
         */
-        run_snapshots[i].globals_size = last_snapshot.globals_size;
-        run_snapshots[i].globals_data = last_snapshot.globals_data;
+        memcpy(&run_snapshots[i], &last_snapshot, sizeof(state_snapshot_t));
         // Should never happen...
         if (run_snapshots[i].globals_size != run_snapshots[0].globals_size) FATAL("This shouldn't happen - binary section size changed");
         if (res != 0) {
@@ -4844,11 +4834,11 @@ static u8 run_entry_check_deterministic(char** argv, struct queue_entry* e, stat
         bool found_diff = false;
         for (int i = 1; i < NONDETERM_CHECK_RUNS; i++) {
             if (run_snapshots[0].gen_regs[gen_reg] != run_snapshots[i].gen_regs[gen_reg]) {
-                ACTF("%s, Run %d: %x != %x", reg_names[gen_reg], i, run_snapshots[i].gen_regs[gen_reg], run_snapshots[0].gen_regs[gen_reg]);
+                //ACTF("%s, Run %d: %x != %x", reg_names[gen_reg], i, run_snapshots[i].gen_regs[gen_reg], run_snapshots[0].gen_regs[gen_reg]);
                 found_diff = true;
             }
             else {
-                ACTF("%s, Run %d: %x == %x", reg_names[gen_reg], i, run_snapshots[i].gen_regs[gen_reg], run_snapshots[0].gen_regs[gen_reg]);
+                //ACTF("%s, Run %d: %x == %x", reg_names[gen_reg], i, run_snapshots[i].gen_regs[gen_reg], run_snapshots[0].gen_regs[gen_reg]);
             }
         }
         run_snapshots[0].gen_regs[gen_reg] = found_diff;

@@ -46,7 +46,7 @@ static u32 total_bbs = 0;
 static u32 visited_bbs = 0;
 
 static LPVOID pCall_offset;
-static HMODULE hModule; // Remove base address of our injected forkserver dll
+static HMODULE hModule; // Remote base address of our injected forkserver dll
 static LPVOID pFuzzer_settings, pForkserver_state; // Remote address of forkserver exports
 static CONTEXT lcContext;
 
@@ -395,26 +395,31 @@ void kill_process() {
 
 #define FORKSERVER_DLL "injected-harness-winfuzz.dll"
 
-static void read_snapshot() {
-	AFL_SETTINGS cur_fuzzer_settings;
-	if (ReadProcessMemory(child_handle, pFuzzer_settings, &cur_fuzzer_settings, sizeof(AFL_SETTINGS), NULL) == 0)
+static void read_from_child(void* remote, void* local, size_t size) 
+{
+	size_t bytes_read = 0;
+	if (ReadProcessMemory(child_handle, remote, local, size, &bytes_read) == 0)
 	{
 		FATAL("Failed to read fuzzer settings from %p", pFuzzer_settings);
 	}
+	if (bytes_read != size) {
+		FATAL("Short read from %p", pFuzzer_settings);
+	}
+}
+
+static void read_snapshot() 
+{
+	
+	AFL_SETTINGS cur_fuzzer_settings;
+	read_from_child(pFuzzer_settings, &cur_fuzzer_settings, sizeof(AFL_SETTINGS));
 	//ACTF("Read fuzzer settings at %p (&last_snapshot = %p)", pFuzzer_settings, cur_fuzzer_settings.last_snapshot);
 	state_snapshot_t cur_snapshot;
-	if (ReadProcessMemory(child_handle, cur_fuzzer_settings.last_snapshot, &cur_snapshot, sizeof(state_snapshot_t), NULL) == 0)
-	{
-		FATAL("Failed to read snapshot from %p", cur_fuzzer_settings.last_snapshot);
-	}
+	read_from_child(cur_fuzzer_settings.last_snapshot, &cur_snapshot, sizeof(state_snapshot_t));
 	//ACTF("Read snapshot at %p", cur_fuzzer_settings.last_snapshot);
 	// Overwrite previous snapshot in global variable - assume it was copied if needed
 	last_snapshot.globals_size = cur_snapshot.globals_size;
 	last_snapshot.globals_data = malloc(cur_snapshot.globals_size);
-	if (ReadProcessMemory(child_handle, cur_snapshot.globals_data, last_snapshot.globals_data, cur_snapshot.globals_size, NULL) == 0)
-	{
-		FATAL("Failed to read snapshot globals from %p", cur_snapshot.globals_data);
-	}
+	read_from_child(cur_snapshot.globals_data, last_snapshot.globals_data, cur_snapshot.globals_size);
 	// Registers
 	memcpy(last_snapshot.gen_regs, cur_snapshot.gen_regs, NUM_REGS * sizeof(last_snapshot.gen_regs[0]));
 }

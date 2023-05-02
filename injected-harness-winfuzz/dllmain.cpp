@@ -729,9 +729,6 @@ static void make_snapshot()
 	state_snapshot.gen_regs[EBP] = tmpEbp;
 	state_snapshot.gen_regs[ESI] = tmpEsi;
 	state_snapshot.gen_regs[EDI] = tmpEdi;
-	for (int i = 0; i < NUM_REGS; i++) {
-		fprintf(fuzzer_stdout, "Reg %d: %x\n", i, state_snapshot.gen_regs[i]);
-	}
 	
 	// Open log file TODO delete this
 	/*
@@ -759,7 +756,7 @@ static void make_snapshot()
 		}
 		state_snapshot.globals_size = sizeof(Page) * numPages;
 		//CLOG("Global bytes: %lu\n", state_snapshot.globals_size);
-		globals_storage = (uint8_t*)real_malloc_ptr(state_snapshot.globals_size);
+		globals_storage = (uint8_t*)real_calloc_ptr(state_snapshot.globals_size, 1);
 		//CLOG("Allocated new global section at %p\n", globals_storage);
 	}
 	uint64_t pageIdx = 0;
