@@ -4777,11 +4777,22 @@ static u8 run_with_input(struct queue_entry* entry, char** argv) {
 
 #define NONDETERM_CHECK_RUNS 10
 // Bytes around each value to mark as nondeterministic
-#define NONDETERM_MULTIBYTE_WIDTH 8
+#define NONDETERM_MULTIBYTE_WIDTH 7
+
+const char* reg_names[] = { "EAX", "ECX", "EDX", "EBX", "ESP", "EBP", "ESI", "EDI" };
 
 /* Collect determinism map for an input */
 static u8 run_entry_check_deterministic(char** argv, struct queue_entry* e, state_snapshot_t* det_map) 
 {
+    ACTF("Checking determinism for: ");
+    char** cur_argv = argv;
+    while (*cur_argv) {
+        printf("%s ", *cur_argv);
+        cur_argv++;
+    }
+    printf("\n");
+    printf("queue entry: %p\n", e);
+    printf("state snapshot: %p\n", det_map);
     run_dryrun = 1;
     // Collect snapshots
     state_snapshot_t run_snapshots[NONDETERM_CHECK_RUNS];
@@ -4833,11 +4844,11 @@ static u8 run_entry_check_deterministic(char** argv, struct queue_entry* e, stat
         bool found_diff = false;
         for (int i = 1; i < NONDETERM_CHECK_RUNS; i++) {
             if (run_snapshots[0].gen_regs[gen_reg] != run_snapshots[i].gen_regs[gen_reg]) {
-               // ACTF("Reg %u, Run %d: %x != %x", gen_reg, i, run_snapshots[i].gen_regs[gen_reg], run_snapshots[0].gen_regs[gen_reg]);
+                ACTF("%s, Run %d: %x != %x", reg_names[gen_reg], i, run_snapshots[i].gen_regs[gen_reg], run_snapshots[0].gen_regs[gen_reg]);
                 found_diff = true;
             }
             else {
-               // ACTF("Reg %u, Run %d: %x == %x", gen_reg, i, run_snapshots[i].gen_regs[gen_reg], run_snapshots[0].gen_regs[gen_reg]);
+                ACTF("%s, Run %d: %x == %x", reg_names[gen_reg], i, run_snapshots[i].gen_regs[gen_reg], run_snapshots[0].gen_regs[gen_reg]);
             }
         }
         run_snapshots[0].gen_regs[gen_reg] = found_diff;
@@ -4888,8 +4899,6 @@ static int64_t has_nondeterministic_neighbor(uint8_t* det_map, uint64_t size, ui
     }
     return 0;
 }
-
-const char* reg_names[] = { "EAX", "ECX", "EDX", "EBX", "ESP", "EBP", "ESI", "EDI" };
 
 /* Return a double representing percent difference between a and b */
 static void compare_snapshots(state_snapshot_t* a, state_snapshot_t* b, state_snapshot_t* det_map, diff_report_t* diff)
@@ -4972,9 +4981,10 @@ static void do_correctness_test(char** argv)
 {
     struct queue_entry* q = queue;
     diff_report_t* input_diffs = calloc(queued_paths, sizeof(diff_report_t));
+    bool* input_results = calloc(queued_paths, sizeof(bool));
     u32 i = 0;
     while (q) {
-        do_correctness_test_for_entry(argv, q, &input_diffs[i]);
+        input_results[i] = do_correctness_test_for_entry(argv, q, &input_diffs[i]);
         if (stop_soon) return;
         q = q->next;
         i++;
@@ -4983,6 +4993,8 @@ static void do_correctness_test(char** argv)
     i = 0;
     q = queue;
     while (q) {
+        if (!input_results[i])
+            continue;
         ACTF("%s: %.2f%% difference (%u elements)", q->fname, input_diffs[i].percent_diff, input_diffs[i].total_diff_elements);
         if (input_diffs[i].total_diff_elements != 0) {
             if (input_diffs[i].global_bytes_diff != 0) {
@@ -5001,6 +5013,7 @@ static void do_correctness_test(char** argv)
         q = q->next;
         i++;
     }
+    free(input_results);
     free(input_diffs);
 }
 

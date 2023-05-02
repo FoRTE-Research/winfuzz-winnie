@@ -712,14 +712,14 @@ static void make_snapshot()
 	 *	Registers
 	 */
 	_asm {
-		mov[tmpEax], eax;
-		mov[tmpEcx], ecx;
-		mov[tmpEdx], edx;
-		mov[tmpEbx], ebx;
-		mov[tmpEsp], esp;
-		mov[tmpEbp], ebp;
-		mov[tmpEsi], esi;
-		mov[tmpEdi], edi;
+		mov tmpEax, eax;
+		mov tmpEcx, ecx;
+		mov tmpEdx, edx;
+		mov tmpEbx, ebx;
+		mov tmpEsp, esp;
+		mov tmpEbp, ebp;
+		mov tmpEsi, esi;
+		mov tmpEdi, edi;
 	}
 	state_snapshot.gen_regs[EAX] = tmpEax;
 	state_snapshot.gen_regs[ECX] = tmpEcx;
@@ -729,6 +729,9 @@ static void make_snapshot()
 	state_snapshot.gen_regs[EBP] = tmpEbp;
 	state_snapshot.gen_regs[ESI] = tmpEsi;
 	state_snapshot.gen_regs[EDI] = tmpEdi;
+	for (int i = 0; i < NUM_REGS; i++) {
+		fprintf(fuzzer_stdout, "Reg %d: %x\n", i, state_snapshot.gen_regs[i]);
+	}
 	
 	// Open log file TODO delete this
 	/*
