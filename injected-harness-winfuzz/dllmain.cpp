@@ -695,6 +695,11 @@ static state_snapshot_t state_snapshot;
 // Space for storing global data in snapshot
 static uint8_t* globals_storage = NULL;
 
+static ULONG_PTR stackLow;
+static ULONG_PTR stackHigh;
+static uint8_t* stack_storage = NULL;
+static DWORD stack_size = 0;
+
 //#define CLOG(...) fprintf(c_log_file, ##__VA_ARGS__##)
 
 // Pain
@@ -708,9 +713,7 @@ static DWORD tmpEsi = NULL;
 static DWORD tmpEdi = NULL;
 static void make_snapshot()
 {
-	/*
-	 *	Registers
-	 */
+	/* Registers */
 	_asm {
 		mov tmpEax, eax;
 		mov tmpEcx, ecx;
@@ -730,48 +733,46 @@ static void make_snapshot()
 	state_snapshot.gen_regs[ESI] = tmpEsi;
 	state_snapshot.gen_regs[EDI] = tmpEdi;
 	
-	// Open log file TODO delete this
+	/* Stack */
 	/*
-	char* logfile_name = (char*)calloc(128, sizeof(char));
-	snprintf(logfile_name, 128, "winfuzz_log_%lu.txt", GetCurrentProcessId());
-	c_log_file = fopen(logfile_name, "w");
-	free(logfile_name);
-	CLOG("Making snapshot\n");
+	GetCurrentThreadStackLimits(&stackLow, &stackHigh);
+	DWORD cur_stack_size = DWORD(stackHigh) - DWORD(tmpEsp);
+	if (cur_stack_size > stack_size) {
+		stack_size = cur_stack_size;
+		fprintf(fuzzer_stdout, "Size of stack: %d\n", stack_size);
+		fprintf(fuzzer_stdout, "Stack is at %p to %p\n", (void*)tmpEbp, (void*)stackHigh);
+		if (stack_storage)
+			free(stack_storage);
+		stack_storage = (uint8_t*)calloc(1, stack_size);
+	}
+	//memcpy(stack_storage, (void*)tmpEbp, stack_size);
 	*/
-	/*
-	 *	Globals
-	 */
-	char* base = (char*)getExeBase();
-	PIMAGE_NT_HEADERS ntHeaders = (PIMAGE_NT_HEADERS)((PCHAR)base + ((PIMAGE_DOS_HEADER)base)->e_lfanew);
-	PIMAGE_SECTION_HEADER section = IMAGE_FIRST_SECTION(ntHeaders);
+
+	/* Globals */
 	// Make storage if it doesn't exist
 	if (globals_storage == NULL) {
-		uint64_t numPages = 0;
-		for (ULONG i = 0; i < ntHeaders->FileHeader.NumberOfSections; i++)
+		uint64_t globals_size = 0;
+		for (int i = 0; i < sectionCopies.size(); i++)
 		{
-			if (section[i].Characteristics & IMAGE_SCN_MEM_WRITE)
-			{
-				numPages += (section[i].Misc.VirtualSize + sizeof(Page) - 1) / sizeof(Page);
-			}
+			globals_size += sectionCopies[i].size;
 		}
-		state_snapshot.globals_size = sizeof(Page) * numPages;
+		state_snapshot.globals_size = globals_size;
 		//CLOG("Global bytes: %lu\n", state_snapshot.globals_size);
 		globals_storage = (uint8_t*)real_calloc_ptr(state_snapshot.globals_size, 1);
 		//CLOG("Allocated new global section at %p\n", globals_storage);
 	}
-	uint64_t pageIdx = 0;
-	uint64_t globals_index = 0;
-	for (ULONG i = 0; i < ntHeaders->FileHeader.NumberOfSections; i++)
+	uint64_t byte_offset = 0;
+	for (int i = 0; i < sectionCopies.size(); i++)
 	{
-		if (section[i].Characteristics & IMAGE_SCN_MEM_WRITE)
-		{
-			char* startOfSection = base + section[i].VirtualAddress;
-			unsigned pagesToCopy = (section[i].Misc.VirtualSize + sizeof(Page) - 1) / sizeof(Page);
-			unsigned pagesCopied = 0;
-
-			memcpy(globals_storage + globals_index, startOfSection, pagesToCopy * sizeof(Page));
-			globals_index += pagesToCopy * sizeof(Page);
+		uint8_t* startOfSection = (uint8_t*)sectionCopies[i].start;
+		//fprintf(fuzzer_stdout, "Iteration %u\n", times_run);
+		//fprintf(fuzzer_stdout, "Section %s is at %p, size %d, copying to %p\n", sectionCopies[i].name, sectionCopies[i].start, sectionCopies[i].size, globals_storage);
+		//fprintf(fuzzer_stdout, "Copying page %d\n", p);
+		//memcpy(globals_storage + byte_offset, &sectionCopies[i].pages[p], sizeof(Page));
+		for (int byte = 0; byte < sectionCopies[i].size; byte++) {
+			globals_storage[byte_offset + byte] = startOfSection[byte];
 		}
+		byte_offset += sectionCopies[i].size;
 	}
 	state_snapshot.globals_data = globals_storage;
 
@@ -822,28 +823,30 @@ __declspec(noreturn) void persistent_report_end()
 		make_snapshot();
 		fuzzer_settings.last_snapshot = &state_snapshot;
 	}
-	//fuzzer_printf("Beginning of report end\n");
-	WINFUZZ_LOG("Beginning of iteration %u report_end\n", times_run);
-	WINFUZZ_LOG("Target start: %x size: %x\n", target_code_start, target_code_size);
-	// Clear vectors and free
-	for (unsigned i = 0; i < heap_alloc_chunks.size(); i++)
-	{
-		//real_heap_free_ptr(heap_alloc_chunks[i].heap, heap_alloc_chunks[i].dw_flags, heap_alloc_chunks[i].mem);
-		WINFUZZ_LOG("Going to HeapFree %p from heap %p: \n", heap_alloc_chunks[i].mem, heap_alloc_chunks[i].heap);
+	if (fuzzer_settings.enable_tes) {
+		//fuzzer_printf("Beginning of report end\n");
+		WINFUZZ_LOG("Beginning of iteration %u report_end\n", times_run);
+		WINFUZZ_LOG("Target start: %x size: %x\n", target_code_start, target_code_size);
+		// Clear vectors and free
+		for (unsigned i = 0; i < heap_alloc_chunks.size(); i++)
+		{
+			//real_heap_free_ptr(heap_alloc_chunks[i].heap, heap_alloc_chunks[i].dw_flags, heap_alloc_chunks[i].mem);
+			WINFUZZ_LOG("Going to HeapFree %p from heap %p: \n", heap_alloc_chunks[i].mem, heap_alloc_chunks[i].heap);
+		}
+		for (unsigned i = 0; i < malloc_chunks.size(); i++)
+		{
+			real_free_ptr(malloc_chunks[i]);
+			WINFUZZ_LOG("Going to free %x\n", malloc_chunks[i]);
+		}
+		for (unsigned i = 0; i < virtual_alloc_chunks.size(); i++)
+		{
+			real_virtual_free_ptr(virtual_alloc_chunks[i], 0, MEM_RELEASE);
+			WINFUZZ_LOG("Going to VirtualFree %p\n", virtual_alloc_chunks[i]);
+		}
+		heap_alloc_chunks.clear();
+		malloc_chunks.clear();
+		virtual_alloc_chunks.clear();
 	}
-	for (unsigned i = 0; i < malloc_chunks.size(); i++)
-	{
-		real_free_ptr(malloc_chunks[i]);
-		WINFUZZ_LOG("Going to free %x\n", malloc_chunks[i]);
-	}
-	for (unsigned i = 0; i < virtual_alloc_chunks.size(); i++)
-	{
-		real_virtual_free_ptr(virtual_alloc_chunks[i], 0, MEM_RELEASE);
-		WINFUZZ_LOG("Going to VirtualFree %p\n", virtual_alloc_chunks[i]);
-	}
-	heap_alloc_chunks.clear();
-	malloc_chunks.clear();
-	virtual_alloc_chunks.clear();
 
 	WINFUZZ_LOG("End of iteration %u report_end\n", times_run);
 	//getc(fuzzer_stdin);
@@ -1425,8 +1428,10 @@ __declspec(noreturn) void persistent_server()
 	trace_printf("Iterating loop\n\n");
 	handlerReentrancy = 0;
 	MemoryBarrier();
-	restoreMutableSections();
-	guardMutableSections();
+	if (fuzzer_settings.enable_tes) {
+		restoreMutableSections();
+		guardMutableSections();
+	}
 	in_target = true;
 	call_target(); // call one persistent function
 }

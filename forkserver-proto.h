@@ -44,6 +44,9 @@ typedef volatile struct _state_snapshot_t
 	// Globals
 	uint64_t globals_size;
 	uint8_t* globals_data;
+	// Stack
+	DWORD stack_size;
+	uint8_t* stack_data;
 	// Registers
 	// eax, ecx, edx, ebx, esp, ebp, esi, edi
 	DWORD gen_regs[NUM_REGS];
@@ -64,6 +67,7 @@ typedef volatile struct _AFL_SETTINGS
 	char minidump_path[MAX_PATH+1];
 	uint8_t enable_correctness_mode;
 	state_snapshot_t* last_snapshot;
+	uint8_t enable_tes;
 } AFL_SETTINGS;
 
 typedef enum _FORKSERVER_STATE

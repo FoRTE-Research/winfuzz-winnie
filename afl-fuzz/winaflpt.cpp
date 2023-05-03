@@ -635,7 +635,7 @@ static int run_once(char **argv, uint32_t timeout, uint32_t init_timeout, int dr
 		watchdog_timeout_time = get_cur_time() + 2 * (init_timeout + timeout);
 
 		char *cmd = argv_to_cmd(argv);
-		CLIENT_ID handles = spawn_child_with_injection(cmd, DRYRUN, timeout, init_timeout);
+		CLIENT_ID handles = spawn_child_with_injection(cmd, DRYRUN, timeout, init_timeout, 0);
 		hProcess = handles.UniqueProcess;
 		hThread = handles.UniqueThread;
 	} else {

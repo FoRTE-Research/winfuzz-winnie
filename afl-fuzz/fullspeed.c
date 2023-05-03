@@ -86,7 +86,7 @@ static int run_target_fullspeed_fork(char **argv, uint32_t timeout, uint32_t ini
 	if (drun == 1) {
 		arm_watchdog_timer((init_timeout + timeout) * 2);
 		char *cmd = argv_to_cmd(argv);
-		spawn_child_with_injection(cmd, DRYRUN, timeout, init_timeout);
+		spawn_child_with_injection(cmd, DRYRUN, timeout, init_timeout, 0);
 		resume_child();
 		ret_status = get_child_result();
 		kill_process();
@@ -132,13 +132,13 @@ static int run_target_fullspeed_fork(char **argv, uint32_t timeout, uint32_t ini
 }
 
 // Persistent mode.
-static int run_target_fullspeed_persistent(char **argv, uint32_t timeout, uint32_t init_timeout, int drun) {
+static int run_target_fullspeed_persistent(char **argv, uint32_t timeout, uint32_t init_timeout, int drun, u8 enable_tes) {
 	int ret = -1, ret_status = -1;
 	if (drun == 1) {
 		// Dry run
 		arm_watchdog_timer((init_timeout + timeout) * 2);
 		char *cmd = argv_to_cmd(argv);
-		spawn_child_with_injection(cmd, DRYRUN, timeout, init_timeout);
+		spawn_child_with_injection(cmd, DRYRUN, timeout, init_timeout, enable_tes);
 		resume_child();
 		ret_status = get_child_result();
 		kill_process();
@@ -146,7 +146,7 @@ static int run_target_fullspeed_persistent(char **argv, uint32_t timeout, uint32
 		arm_watchdog_timer(timeout * 2);
 		if (persistent_pid < 0 || !is_child_running()) {
 			//ACTF("Launch new persistent server\n");
-			start_persistent(argv, timeout, init_timeout);
+			start_persistent(argv, timeout, init_timeout, enable_tes);
 		}
 		// Normal execution
 		ret_status = run_with_persistent();
@@ -168,11 +168,11 @@ static int run_target_fullspeed_persistent(char **argv, uint32_t timeout, uint32
 	return ret;
 }
 
-int run_target_fullspeed(char **argv, uint32_t timeout, uint32_t init_timeout, int drun) {
+int run_target_fullspeed(char **argv, uint32_t timeout, uint32_t init_timeout, int drun, u8 enable_tes) {
 	if (use_fork)
 		return run_target_fullspeed_fork(argv, timeout, init_timeout, drun);
 	else
-		return run_target_fullspeed_persistent(argv, timeout, init_timeout, drun);
+		return run_target_fullspeed_persistent(argv, timeout, init_timeout, drun, enable_tes);
 }
 
 void destroy_target_process() {

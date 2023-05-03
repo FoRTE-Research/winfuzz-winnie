@@ -461,7 +461,7 @@ int get_child_result()
 	// !!!! The child is now waiting on YOU to kill it! Remember to kill it!
 }
 
-CLIENT_ID spawn_child_with_injection(char* cmd, INJECTION_MODE injection_type, uint32_t timeout, uint32_t init_timeout)
+CLIENT_ID spawn_child_with_injection(char* cmd, INJECTION_MODE injection_type, uint32_t timeout, uint32_t init_timeout, u8 enable_tes)
 {
 	//ACTF("Injecting DLL!");
 	// Spawn the process suspended. We can't inject immediately, however. Need to let the program initialize itself before we can load a library.
@@ -612,6 +612,7 @@ CLIENT_ID spawn_child_with_injection(char* cmd, INJECTION_MODE injection_type, u
 	fuzzer_settings.persistentIterations = options.persistent_iterations;
 	fuzzer_settings.enable_correctness_mode = options.enable_correctness_mode;
 	fuzzer_settings.last_snapshot = NULL;
+	fuzzer_settings.enable_tes = enable_tes;
 	if (!WriteProcessMemory(child_handle, pFuzzer_settings, &fuzzer_settings, sizeof(AFL_SETTINGS), &nWritten) || nWritten < sizeof(AFL_SETTINGS))
 	{
 		dank_perror("Writing fuzzer settings into child");
@@ -689,7 +690,7 @@ void resume_child()
 DWORD spawn_forkserver(char** argv, uint32_t timeout, uint32_t init_timeout)
 {
 	char *cmd = argv_to_cmd(argv);
-	spawn_child_with_injection(cmd, FORK, timeout, init_timeout);
+	spawn_child_with_injection(cmd, FORK, timeout, init_timeout, 0);
 	resume_child();
 	return GetProcessId(child_handle);
 }
@@ -763,10 +764,10 @@ void read_result_persistent(AFL_PERSISTENT_RESULT* persistentResult) {
 	}
 }
 
-void start_persistent(char** argv, uint32_t timeout, uint32_t init_timeout)
+void start_persistent(char** argv, uint32_t timeout, uint32_t init_timeout, u8 enable_tes)
 {
 	char *cmd = argv_to_cmd(argv);
-	spawn_child_with_injection(cmd, PERSISTENT, timeout, init_timeout);
+	spawn_child_with_injection(cmd, PERSISTENT, timeout, init_timeout, enable_tes);
 	resume_child();
 	persistent_pid = GetProcessId(child_handle);
 

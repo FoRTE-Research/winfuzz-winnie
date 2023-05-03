@@ -98,6 +98,7 @@ u8 forkserver_same_console = 0;       /* Don't create new console window */
 
 BOOL discovered_inst = FALSE;         /* Flag for the dry run            */
 char run_dryrun = 1;
+u8 run_enable_tes = 1;                /* Enable TES state restoration */
 u32 queued_paths;                     /* Total number of queued testcases */
 char no_trim;
 
@@ -2272,7 +2273,7 @@ static u8 run_target(char** argv, u32 timeout) {
   }
 #endif
   if (use_fullspeed) {
-    return run_target_fullspeed(argv, timeout, init_tmout, run_dryrun);
+    return run_target_fullspeed(argv, timeout, init_tmout, run_dryrun, run_enable_tes);
   } else {
 	FATAL("Unsupported run mode.");
   }
@@ -4798,7 +4799,9 @@ static u8 run_entry_check_deterministic(char** argv, struct queue_entry* e, stat
         */
         memcpy(&run_snapshots[i], &last_snapshot, sizeof(state_snapshot_t));
         // Should never happen...
-        if (run_snapshots[i].globals_size != run_snapshots[0].globals_size) FATAL("This shouldn't happen - binary section size changed");
+        if (run_snapshots[i].globals_size != run_snapshots[0].globals_size) {
+            FATAL("This shouldn't happen - binary section size changed from %llu to %llu", run_snapshots[i].globals_size, run_snapshots[0].globals_size);
+        }
         if (res != 0) {
             return res;
         }
@@ -7682,6 +7685,9 @@ int main(int argc, char** argv) {
 
   if (correctness_mode) {
       ACTF("Performing correctness test.");
+      run_enable_tes = 1;
+      do_correctness_test(use_argv);
+      run_enable_tes = 0;
       do_correctness_test(use_argv);
       goto stop_fuzzing;
   }
