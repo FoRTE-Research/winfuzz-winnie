@@ -4776,14 +4776,25 @@ static u8 run_with_input(struct queue_entry* entry, char** argv) {
 	return res;
 }
 
-#define NONDETERM_CHECK_RUNS 10
+#define NONDETERM_CHECK_RUNS 25
 // Bytes around each value to mark as nondeterministic
 #define NONDETERM_MULTIBYTE_WIDTH 7
 
 const char* reg_names[] = { "EAX", "ECX", "EDX", "EBX", "ESP", "EBP", "ESI", "EDI" };
 
+typedef struct _det_map_t {
+    state_snapshot_t map; // Boolean map - nonzero elements are nondeterministic
+    bool stack_size_deterministic; // Were changes to the size of the stack observed?
+} det_map_t;
+
+static void free_snapshot(state_snapshot_t* freed)
+{
+    free(freed->globals_data);
+    free(freed->stack_data);
+}
+
 /* Collect determinism map for an input */
-static u8 run_entry_check_deterministic(char** argv, struct queue_entry* e, state_snapshot_t* det_map) 
+static u8 run_entry_check_deterministic(char** argv, struct queue_entry* e, det_map_t* det_map) 
 {
     run_dryrun = 1;
     // Collect snapshots
@@ -4823,13 +4834,36 @@ static u8 run_entry_check_deterministic(char** argv, struct queue_entry* e, stat
         }
 	}
     ACTF("%u nondeterministic global bytes", num_nondet, e->fname);
-    
-    det_map->globals_data = run_snapshots[0].globals_data;
-    det_map->globals_size = run_snapshots[0].globals_size;
-    // Free the others
-    for (int i = 1; i < NONDETERM_CHECK_RUNS; i++) {
-        free(run_snapshots[i].globals_data);
+    det_map->map.globals_data = run_snapshots[0].globals_data;
+    det_map->map.globals_size = run_snapshots[0].globals_size;
+
+    // Stack
+    uint64_t num_nondet_stack = 0;
+    det_map->stack_size_deterministic = true;
+    for (uint64_t byte_idx = 0; byte_idx < run_snapshots[0].stack_size; byte_idx++) {
+        bool found_diff = false;
+        for (int i = 1; i < NONDETERM_CHECK_RUNS; i++) {
+            // Handle the case where stack size changed between runs
+            if (run_snapshots[i].stack_size != run_snapshots[0].stack_size) {
+                det_map->stack_size_deterministic = false;
+            }
+            if (byte_idx >= run_snapshots[i].stack_size) {
+                continue;
+            }
+            else {
+                if (run_snapshots[0].stack_data[byte_idx] != run_snapshots[i].stack_data[byte_idx]) {
+                    found_diff = true;
+                }
+            }
+        }
+        run_snapshots[0].stack_data[byte_idx] = found_diff;
+        if (found_diff) {
+            num_nondet_stack++;
+        }
     }
+    ACTF("%u nondeterministic stack bytes", num_nondet_stack, e->fname);
+    det_map->map.stack_data = run_snapshots[0].stack_data;
+    det_map->map.stack_size = run_snapshots[0].stack_size;
 
     // Registers
     uint64_t num_nondet_reg = 0;
@@ -4851,7 +4885,12 @@ static u8 run_entry_check_deterministic(char** argv, struct queue_entry* e, stat
     }
     ACTF("%u nondeterministic registers", num_nondet_reg);
 
-    memcpy(det_map->gen_regs, run_snapshots[0].gen_regs, NUM_REGS * sizeof(det_map->gen_regs[0]));
+    memcpy(det_map->map.gen_regs, run_snapshots[0].gen_regs, NUM_REGS * sizeof(det_map->map.gen_regs[0]));
+
+    // Free the others
+    for (int i = 1; i < NONDETERM_CHECK_RUNS; i++) {
+        free_snapshot(&run_snapshots[i]);
+    }
 
     return 0;
 }
@@ -4860,18 +4899,14 @@ static u8 run_entry_collect_state_map(char** argv, struct queue_entry* e, state_
 {
     u8 res = run_with_input(e, argv);
     
-    state_map->globals_size = last_snapshot.globals_size;
-    state_map->globals_data = last_snapshot.globals_data;
-
-    for (int i = 0; i < NUM_REGS; i++) {
-        state_map->gen_regs[i] = last_snapshot.gen_regs[i];
-    }
+    memcpy(state_map, &last_snapshot, sizeof(state_snapshot_t));
 
     return res;
 }
 
 typedef struct {
     uint64_t global_bytes_diff;
+    uint64_t stack_bytes_diff;
     bool regs_diff[NUM_REGS];
     uint64_t num_regs_diff;
     uint64_t total_diff_elements;
@@ -4894,16 +4929,21 @@ static int64_t has_nondeterministic_neighbor(uint8_t* det_map, uint64_t size, ui
 }
 
 /* Return a double representing percent difference between a and b */
-static void compare_snapshots(state_snapshot_t* a, state_snapshot_t* b, state_snapshot_t* det_map, diff_report_t* diff)
+static void compare_snapshots(state_snapshot_t* a, state_snapshot_t* b, det_map_t* det_map, state_snapshot_t* overall, diff_report_t* diff)
 {
     // Compare globals
     diff->global_bytes_diff = 0;
     for (uint64_t i = 0; i < a->globals_size; i++) {
         if ((a->globals_data[i] != b->globals_data[i])) {
-            int64_t nondet_neighbor = has_nondeterministic_neighbor(det_map->globals_data, det_map->globals_size, i);
-            if (det_map->globals_data[i] == 0 && nondet_neighbor == 0) {
-                printf("Byte at %llu differs: %d != %d\n", i, a->globals_data[i], b->globals_data[i]);
-                diff->global_bytes_diff++;
+            int64_t nondet_neighbor = has_nondeterministic_neighbor(det_map->map.globals_data, det_map->map.globals_size, i);
+            if (det_map->map.globals_data[i] == 0 && nondet_neighbor == 0) {
+                printf("Global byte at %llu differs: %d != %d\n", i, a->globals_data[i], b->globals_data[i]);
+                if (overall->globals_data[i] || (has_nondeterministic_neighbor(overall->globals_data, overall->globals_size, i) != 0)) {
+                    printf("\tBut this byte is marked as nondeterministic in the global map.\n");
+                }
+                else {
+                    diff->global_bytes_diff++;
+                }
             }
         }
     }
@@ -4911,34 +4951,91 @@ static void compare_snapshots(state_snapshot_t* a, state_snapshot_t* b, state_sn
     diff->num_regs_diff = 0;
     for (uint64_t i = 0; i < NUM_REGS; i++) {
         diff->regs_diff[i] = false;
-        if ((a->gen_regs[i] != b->gen_regs[i]) && (!det_map->gen_regs[i])) {
-            printf("\t%s is incorrect (%x != %x)\n", reg_names[i], a->gen_regs[i], b->gen_regs[i]);
+        if ((a->gen_regs[i] != b->gen_regs[i]) && (!det_map->map.gen_regs[i])) {
+            printf("\t%s differs (%x != %x)\n", reg_names[i], a->gen_regs[i], b->gen_regs[i]);
             diff->num_regs_diff++;
             diff->regs_diff[i] = true;
         }
     }
+    // Compare stack
+    diff->stack_bytes_diff = 0;
+    printf("Stack size: %lu\n", a->stack_size);
+    if (a->stack_size != b->stack_size || a->stack_size != det_map->map.stack_size) {
+        WARNF("Stack size changed between runs (%lu, %lu, %lu)", a->stack_size, b->stack_size, det_map->map.stack_size);
+    }
+    if (det_map->stack_size_deterministic) {
+        for (uint64_t i = 0; i < a->stack_size; i++) {
+            if ((a->stack_data[i] != b->stack_data[i])) {
+                int64_t nondet_neighbor = has_nondeterministic_neighbor(det_map->map.stack_data, det_map->map.stack_size, i);
+                if (det_map->map.stack_data[i] == 0 && nondet_neighbor == 0) {
+                    printf("Stack byte at %llu differs: %d != %d\n", i, a->stack_data[i], b->stack_data[i]);
+                    diff->stack_bytes_diff++;
+                }
+            }
+        }
+    }
+    else {
+        printf("Skipping stack comparison because it's nondeterministic\n");
+    }
 
-    diff->total_diff_elements = diff->global_bytes_diff + diff->num_regs_diff;
+    diff->total_diff_elements = diff->global_bytes_diff + diff->num_regs_diff + diff->stack_bytes_diff;
    
-    double total_diff = (double)diff->global_bytes_diff + (double)diff->num_regs_diff;
-    double total_elements = (double)a->globals_size + (double)NUM_REGS;
+    double total_diff = (double)diff->total_diff_elements;
+    double total_elements = (double)a->globals_size + (double)NUM_REGS + (double)a->stack_size;
 
     diff->percent_diff = total_diff / total_elements;
+    printf("Finished state snapshot\n");
+}
+
+/* Boolean or 2 determinism maps, placing result in a */
+static void or_det_maps(state_snapshot_t* a, state_snapshot_t* b)
+{
+    for (uint64_t i = 0; i < a->globals_size; i++) {
+        a->globals_data[i] = a->globals_data[i] || b->globals_data[i];
+    }
+}
+
+/* Get individual maps and or'ed map for entire queue */
+/* Right now just does globals... */
+static void get_det_map_for_queue(char** argv, det_map_t* individual_det_maps, state_snapshot_t* final_det_map)
+{
+    run_dryrun = 1;
+    struct queue_entry* e = queue;
+    uint64_t index = 0;
+    while (e) {
+        printf("Map for entry %s\n", e->fname);
+        u8 res = run_entry_check_deterministic(argv, e, &individual_det_maps[index]);
+        if (res != 0) {
+            ACTF("Input %s caused error %u", e->fname, res);
+            continue;
+        }
+        if (index == 0) {
+            memcpy(final_det_map, &individual_det_maps[index], sizeof(state_snapshot_t));
+        }
+        else {
+            or_det_maps(final_det_map, &individual_det_maps[index]);
+        }
+        e = e->next;
+        index++;
+    }
 }
 
 /* Return true if result should be considered */
-static bool do_correctness_test_for_entry(char** argv, struct queue_entry* e, diff_report_t* diff)
+static bool do_correctness_test_for_entry(char** argv, struct queue_entry* e, det_map_t* individual, state_snapshot_t* overall_det_map, diff_report_t* diff)
 {
     ACTF("Correctness test for %s", e->fname);
 
-    // Check for nondeterminism and get map
+    /* Reset the process by doing a dryrun - hacky but works */
     run_dryrun = 1;
-    state_snapshot_t det_map;
-    u8 res = run_entry_check_deterministic(argv, e, &det_map);
+    state_snapshot_t tmp_snapshot;
+    u8 res = run_entry_collect_state_map(argv, e, &tmp_snapshot);
+    free_snapshot(&tmp_snapshot);
     if (res != 0) {
         ACTF("Input %s caused error %u", e->fname, res);
         return false;
     }
+    /* Reset the process */
+    //destroy_target_process();
 
     // Sample known good state
     run_dryrun = 0;
@@ -4952,32 +5049,38 @@ static bool do_correctness_test_for_entry(char** argv, struct queue_entry* e, di
     // Finally, run every other queue entry, followed by e, to check
     // for state corruption
     struct queue_entry* q = queue;
-    state_snapshot_t tmp_snapshot;
     while (q) {
         res = run_entry_collect_state_map(argv, q, &tmp_snapshot);
-        free(tmp_snapshot.globals_data);
+        free_snapshot(&tmp_snapshot);
         if (res != 0) continue;
         if (stop_soon) break;
         q = q->next;
     }
     res = run_entry_collect_state_map(argv, e, &tmp_snapshot);
     
-    compare_snapshots(&good_map, &tmp_snapshot, &det_map, diff);
+    compare_snapshots(&good_map, &tmp_snapshot, individual, overall_det_map, diff);
 
-    free(good_map.globals_data);
-    free(tmp_snapshot.globals_data);
-    free(det_map.globals_data);
+    free_snapshot(&good_map);
+    free_snapshot(&tmp_snapshot);
     return true;
 }
+
+#define NUM_TESTED_ENTRIES 1000
 
 static void do_correctness_test(char** argv)
 {
     struct queue_entry* q = queue;
+    det_map_t* individual_det_maps = calloc(queued_paths, sizeof(det_map_t));
+    state_snapshot_t overall_det_map;
     diff_report_t* input_diffs = calloc(queued_paths, sizeof(diff_report_t));
     bool* input_results = calloc(queued_paths, sizeof(bool));
+    
+    // Get the determinism maps first
+    get_det_map_for_queue(argv, individual_det_maps, &overall_det_map);
+
     u32 i = 0;
-    while (q) {
-        input_results[i] = do_correctness_test_for_entry(argv, q, &input_diffs[i]);
+    while (q && i < NUM_TESTED_ENTRIES) {
+        input_results[i] = do_correctness_test_for_entry(argv, q, &individual_det_maps[i], &overall_det_map, &input_diffs[i]);
         if (stop_soon) return;
         q = q->next;
         i++;
@@ -4985,13 +5088,16 @@ static void do_correctness_test(char** argv)
     ACTF("-----------------CORRECTNESS TEST RESULTS----------------------------");
     i = 0;
     q = queue;
-    while (q) {
+    while (q && i < NUM_TESTED_ENTRIES) {
         if (!input_results[i])
             continue;
         ACTF("%s: %.2f%% difference (%u elements)", q->fname, input_diffs[i].percent_diff, input_diffs[i].total_diff_elements);
         if (input_diffs[i].total_diff_elements != 0) {
             if (input_diffs[i].global_bytes_diff != 0) {
                 WARNF("Differing global bytes: %llu", input_diffs[i].global_bytes_diff);
+            }
+            if (input_diffs[i].stack_bytes_diff != 0) {
+                WARNF("Differing stack bytes: %llu", input_diffs[i].stack_bytes_diff);
             }
             if (input_diffs[i].num_regs_diff != 0) {
                 WARNF("Differing registers (%llu):", input_diffs[i].num_regs_diff);
@@ -5006,6 +5112,7 @@ static void do_correctness_test(char** argv)
         q = q->next;
         i++;
     }
+    free(individual_det_maps);
     free(input_results);
     free(input_diffs);
 }
@@ -7687,8 +7794,13 @@ int main(int argc, char** argv) {
       ACTF("Performing correctness test.");
       run_enable_tes = 1;
       do_correctness_test(use_argv);
+      /*
+      printf("RESULTS WITHOUT TES\n");
+      printf("--------------------------------------------------------------------------------\n");
       run_enable_tes = 0;
       do_correctness_test(use_argv);
+      */
+      
       goto stop_fuzzing;
   }
 

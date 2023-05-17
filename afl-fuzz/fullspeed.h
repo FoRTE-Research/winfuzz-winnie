@@ -1,6 +1,6 @@
 #pragma once
 
-int fullspeed_init(int argc, char **argv);
+int fullspeed_init(int argc, char **argv, u8 correctness_mode);
 int run_target_fullspeed(char **argv, uint32_t timeout, uint32_t init_timeout, int drun);
 void destroy_target_process();
 void setup_watchdog_timer();

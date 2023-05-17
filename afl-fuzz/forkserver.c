@@ -400,16 +400,15 @@ static void read_from_child(void* remote, void* local, size_t size)
 	size_t bytes_read = 0;
 	if (ReadProcessMemory(child_handle, remote, local, size, &bytes_read) == 0)
 	{
-		FATAL("Failed to read fuzzer settings from %p", pFuzzer_settings);
+		FATAL("Failed to read %u bytes from %p", size, remote);
 	}
 	if (bytes_read != size) {
-		FATAL("Short read from %p", pFuzzer_settings);
+		FATAL("Short read from %p", remote);
 	}
 }
 
 static void read_snapshot() 
-{
-	
+{	
 	AFL_SETTINGS cur_fuzzer_settings;
 	read_from_child(pFuzzer_settings, &cur_fuzzer_settings, sizeof(AFL_SETTINGS));
 	//ACTF("Read fuzzer settings at %p (&last_snapshot = %p)", pFuzzer_settings, cur_fuzzer_settings.last_snapshot);
@@ -418,10 +417,15 @@ static void read_snapshot()
 	//ACTF("Read snapshot at %p", cur_fuzzer_settings.last_snapshot);
 	// Overwrite previous snapshot in global variable - assume it was copied if needed
 	last_snapshot.globals_size = cur_snapshot.globals_size;
-	last_snapshot.globals_data = malloc(cur_snapshot.globals_size);
+	last_snapshot.globals_data = calloc(cur_snapshot.globals_size, 1);
 	read_from_child(cur_snapshot.globals_data, last_snapshot.globals_data, cur_snapshot.globals_size);
 	// Registers
 	memcpy(last_snapshot.gen_regs, cur_snapshot.gen_regs, NUM_REGS * sizeof(last_snapshot.gen_regs[0]));
+	// Stack
+	last_snapshot.stack_size = cur_snapshot.stack_size;
+	last_snapshot.stack_data = calloc(cur_snapshot.stack_size, 1);
+	read_from_child(cur_snapshot.stack_data, last_snapshot.stack_data, cur_snapshot.stack_size);
+	//printf("Read stack, size is %lu\n", last_snapshot.stack_size);
 }
 
 int get_child_result()
@@ -441,8 +445,7 @@ int get_child_result()
 		}
 		// trace_printf("Forkserver result: %d\n", forkserverResult.StatusCode);
 	} while (forkserverResult.StatusCode == AFL_CHILD_COVERAGE);
-
-	if (options.enable_correctness_mode) {
+	if (options.enable_correctness_mode && forkserverResult.StatusCode == AFL_CHILD_SUCCESS) {
 		read_snapshot();
 	}
 
@@ -839,7 +842,7 @@ int run_with_persistent() {
 
 	AFL_PERSISTENT_RESULT persistentResult;
 	read_result_persistent(&persistentResult); // it SHOULD self-suspend at report_ends
-	if (options.enable_correctness_mode) {
+	if (options.enable_correctness_mode && persistentResult.StatusCode == AFL_CHILD_SUCCESS) {
 		read_snapshot();
 	}
 	return get_ret_val_persistent(persistentResult.StatusCode);

@@ -606,7 +606,7 @@ int pt_init(int argc, const char **argv, char *module_dir) {
 		}
 	}
 	if (lastoption <= 0) return 0;
-	forkserver_options_init(lastoption - last_pt_option - 1, argv + last_pt_option + 1);
+	forkserver_options_init(lastoption - last_pt_option - 1, argv + last_pt_option + 1, 0);
 	
 
 	if (!EnableAndValidateIptServices()) {

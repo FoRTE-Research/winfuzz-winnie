@@ -13,6 +13,7 @@ Vector<SectionCopy> sectionCopies = {};
 Vector<char*> trackedDlls = {};
 
 static FILE* c_log_file = NULL;
+FILE* fuzzer_stdout, * fuzzer_stdin;
 
 #define USER_SEGHANDLE
 
@@ -26,7 +27,27 @@ void copyMutableSections()
 	size_t numPages = 0; // Total number of pages in all mutable sections
 	for (ULONG i = 0; i < ntHeaders->FileHeader.NumberOfSections; i++)
 	{
-		if (section[i].Characteristics & IMAGE_SCN_MEM_WRITE)
+		/*
+		if (strcmp((char*)section[i].Name, ".exptbl") == 0) {
+			fprintf(fuzzer_stdout, "Skipping .exptbl section\n");
+			continue;
+		}
+		if (strcmp((char*)section[i].Name, ".tls") == 0) {
+			fprintf(fuzzer_stdout, "Skipping .tls section\n");
+			continue;
+		}
+		if (strcmp((char*)section[i].Name, ".CRT") == 0) {
+			fprintf(fuzzer_stdout, "Skipping .CRT section\n");
+			continue;
+		}
+		*/
+		/*
+		if (strcmp((char*)section[i].Name, ".idata") == 0) {
+			fprintf(fuzzer_stdout, "Skipping .idata section\n");
+			continue;
+		}
+		*/
+		if ((section[i].Characteristics & IMAGE_SCN_MEM_WRITE))
 		{
 			SectionCopy copy;
 			copy.start = base + section[i].VirtualAddress;
@@ -38,6 +59,7 @@ void copyMutableSections()
 			memcpy(copy.ptr, copy.start, copy.size);
 			memcpy(copy.name, section[i].Name, 8);
 			copy.name[8] = '\0';
+			fprintf(fuzzer_stdout, "Copying %s section\n", copy.name);
 			numPages += (section[i].Misc.VirtualSize + sizeof(Page) - 1) / sizeof(Page);
 			sectionCopies.push_back(copy);
 		}
@@ -199,8 +221,6 @@ void restoreMutableSections()
 
 __declspec(noreturn) void bye();
 __declspec(noreturn) void suicide();
-
-FILE*fuzzer_stdout, *fuzzer_stdin;
 
 #define fuzzer_printf(...) fprintf(fuzzer_stdout, ##__VA_ARGS__##);
 
@@ -734,9 +754,8 @@ static void make_snapshot()
 	state_snapshot.gen_regs[EDI] = tmpEdi;
 	
 	/* Stack */
-	/*
 	GetCurrentThreadStackLimits(&stackLow, &stackHigh);
-	DWORD cur_stack_size = DWORD(stackHigh) - DWORD(tmpEsp);
+	DWORD cur_stack_size = DWORD(stackHigh) - DWORD(tmpEbp);
 	if (cur_stack_size > stack_size) {
 		stack_size = cur_stack_size;
 		fprintf(fuzzer_stdout, "Size of stack: %d\n", stack_size);
@@ -745,8 +764,9 @@ static void make_snapshot()
 			free(stack_storage);
 		stack_storage = (uint8_t*)calloc(1, stack_size);
 	}
-	//memcpy(stack_storage, (void*)tmpEbp, stack_size);
-	*/
+	memcpy(stack_storage, (void*)tmpEbp, stack_size);
+	state_snapshot.stack_size = stack_size;
+	state_snapshot.stack_data = stack_storage;
 
 	/* Globals */
 	// Make storage if it doesn't exist
@@ -765,12 +785,25 @@ static void make_snapshot()
 	for (int i = 0; i < sectionCopies.size(); i++)
 	{
 		uint8_t* startOfSection = (uint8_t*)sectionCopies[i].start;
+		fprintf(fuzzer_stdout, "Section %s starts at %llu\n", sectionCopies[i].name, byte_offset);
 		//fprintf(fuzzer_stdout, "Iteration %u\n", times_run);
 		//fprintf(fuzzer_stdout, "Section %s is at %p, size %d, copying to %p\n", sectionCopies[i].name, sectionCopies[i].start, sectionCopies[i].size, globals_storage);
 		//fprintf(fuzzer_stdout, "Copying page %d\n", p);
 		//memcpy(globals_storage + byte_offset, &sectionCopies[i].pages[p], sizeof(Page));
-		for (int byte = 0; byte < sectionCopies[i].size; byte++) {
-			globals_storage[byte_offset + byte] = startOfSection[byte];
+		for (int byte = 0; byte < sectionCopies[i].size; byte += 4096) {
+			// Make sure page permissions allow reading from global var pages
+			// Added to support an OCaml binary (smpdf), which does strange things like setting guard pages on 
+			// its global variables at runtime
+			DWORD oldProtect;
+			if (!VirtualProtect(PVOID(startOfSection + byte), 4096, PAGE_READWRITE, &oldProtect)) {
+				FATAL("Could not change page protections on global page at %p", startOfSection + byte);
+			}
+			//globals_storage[byte_offset + byte] = startOfSection[byte];
+			memcpy(globals_storage + byte_offset + byte, startOfSection + byte, 4096);
+			DWORD oldProtect2;
+			if (!VirtualProtect(PVOID(startOfSection + byte), 4096, oldProtect, &oldProtect2)) {
+				FATAL("Could not change page protections oon global page at %p", startOfSection + byte);
+			}
 		}
 		byte_offset += sectionCopies[i].size;
 	}
@@ -798,7 +831,13 @@ __declspec(noreturn) void afl_report_end()
 	}
 	//trace_printf("Okay, goodbye.\n");
 	//getc(fuzzer_stdin);
-	bye();
+	// The fuzzer still needs to read the state snapshot, so wait for it here
+	if (fuzzer_settings.enable_correctness_mode) {
+		SuspendThread(GetCurrentThread());
+	}
+	else {
+		bye();
+	}
 }
 
 __declspec(noreturn) void fork_report_end()
@@ -818,6 +857,7 @@ __declspec(noreturn) void fork_report_end()
 __declspec(noreturn) void persistent_report_end()
 {
 	in_target = false;
+	//SuspendThread(GetCurrentThread());
 	// Take snapshot for correctness mode
 	if (fuzzer_settings.enable_correctness_mode) {
 		make_snapshot();
@@ -1975,7 +2015,6 @@ DWORD CALLBACK initThreadStart(LPVOID hModule)
 	{
 		FATAL("ConnectNamedPipe");
 	}
-
 	return 0;
 }
 

@@ -39,7 +39,7 @@ typedef struct _forkserver_option_t {
 
 extern forkserver_option_t options;
 
-void forkserver_options_init(int argc, const char *argv[]);
+void forkserver_options_init(int argc, const char *argv[], u8 run_correctness_mode);
 void load_bbs(char *bbfile);
 CLIENT_ID spawn_child_with_injection(char* cmd, INJECTION_MODE injection_type, uint32_t timeout, uint32_t init_timeout, u8 enable_tes);
 void resume_child();
