@@ -249,8 +249,3 @@ So overall, the information flows like this: AFL<---pipe--->forkserver<---pipe--
 The reason that we can't save the context or run the forkserver from another thread is that when we fork, *only the forking thread is cloned*. In other words, calling fork from a different thread will wipe out thread-local storage (TLS) which will lead to incorrect behavior. That's why we need to do the complicated context-switching dance to run the forkserver from the same thread as the target.
 
 The code for this stuff is in `HarnessCallback` in the forkserver.
-
-## Maintainers
-
-- Stephen Tong (@stong): fuzzer and forkserver
-- Jinho Jung (@jjung63): harness synthesizer 
