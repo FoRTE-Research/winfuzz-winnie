@@ -2,53 +2,42 @@
 
 Collaborative repo for [WinFuzz](https://github.com/FoRTE-Research/winfuzz-master) ported atop of [Winnie](https://github.com/sslab-gatech/winnie).
 
+## Building
+
+You will need Visual Studio 2022 with:
+ - Command line build tools
+ - .NET framework development tools (for sn.exe, which Detours requires to build)
+Download Microsoft's [Detours](https://github.com/microsoft/Detours) into the root directory of the repo, then compile it:
+```nmake```
+The ```Detours-main/include``` and ```Detours-main/lib.X86``` directories should now be populated, and you can build the main WinFuzz solution.
+
 ## Project structure
 
  - afl-fuzz/ -- Main fuzzer code ([WinAFL](https://github.com/googleprojectzero/winafl) fork)
  - forklib/ -- Magic library where the fork() happens.
  - injected-harness/ -- A forkserver and instrumentation agent DLL which gets injected into fuzzing target programs. Communicates with the fuzzer over a named pipe IPC.
+ - injected-harness-winfuzz/ -- Target-embedded snapshotting implementation
  - intel-libipt/ -- Prebuilt binaries for Intel's [libipt](https://github.com/intel/libipt)
  - ipttool/, libipt/ -- Controls the Windows Intel PT driver (forked from [winipt](https://github.com/ionescu007/winipt))
  - wow64ext/ -- Library for interacting with 64-bit address space from 32-bit (WoW64) applications ([forked]((https://github.com/rwfpl/rewolf-wow64ext)))
  - samples/ -- An toy example target application to fuzz with supporting files and harness.
  - experiments/ -- Driver programs for testing individual components of the fuzzer.
 
-![winnie architecture diagram](docs/architecture.png)
-
 ## Supported Systems
 
-The fuzzer was tested on Windows 10 x64 1809 17763.973. **Any other configurations should be considered as unsupported.** Notwithstanding that, it probably still works on most 64-bit Windows 10 systems 1809 and up (but no guarantees). Windows 7 isn't supported because of differences in the CSRSS and subsystem implementation.
+WinFuzz supports Windows 10 and 11.
 
-The fuzzer requires Administrator permissions.
+**Note that Windows' antivirus (Antimalware Service Executable in task manager) will significantly slow down fuzzing and should be disabled.**
 
-Fuzzer can fuzz both 64-bit and 32-bit applications.
-
-## Building
-
-We try to make the build process as streamlined as possible. Still, you need to prepare the build environment before compiling. You can use Visual Studio 2017 or 2019.
-
-### Generate csrss offsets
-The forklib relies on hardcoded offsets that are reverse-engineered from `csrss.dll` and `ntdll.dll`. As you might expect, these offsets vary from system-to-system. **If the offsets are wrong, the fuzzer will not work. You need to regenerate the offsets and recompile for YOUR system.** To generate them:
-
-```bash
-cd forklib/
-# python3 is not supported. Please use python2
-python2 -m pip install construct pefile # get dependencies
-python2 ./gen_csrss_offsets.py
-cat csrss_offsets.h # check the generated output
-```
-
-The script downloads PDBs from Microsoft's symbol servers and parses them to extract the offsets for you automatically.
-
-### Compile
-
-After that everything should "just work", just open the solution in VS2017 and build. VS2019 also should work. You should use the Release configuration builds. The Debug builds are extremely slow as they sacrifice performance for verbosity and debug output.
+Currently, only 32-bit builds are supported (inline asm).
 
 ## Quick-start
 
 For a complete walkthrough, check out the [guide for fuzzing a toy example program](docs/walkthrough.md).
 
 ## Usage
+
+The harnessing system remains compatible with the original [Winnie](https://github.com/sslab-gatech/winnie) system, so their directions and examples will still work (see below).
 
 Command-line options:
 
