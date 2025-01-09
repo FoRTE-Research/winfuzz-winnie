@@ -1,0 +1,11 @@
+This directory is an example for how to set up fuzzing with the benchmark_winfuzz.bat script.
+The names matter, e.g. if your binary is called test.exe, the directory must be named "test", the bblist must be bblist_test.bb, and the harness must be test_harness.dll.
+
+The in directory should contain a set of seed inputs for the fuzzer.
+Fill this directory with small example files in your target's file format, ideally ones which exercise a large portion of the target's code (only one seed is actually needed).
+
+The bblist file can be generated using the Ghidra script (bb_ghidra.py in the root directory.)
+
+If you're fuzzing an .exe, the harness can be generated using the project in the harness-template directory.
+
+For a .dll, either use the Winnie harness generator (requires IDA pro license) or write your own based on the examples in winnie-harness-samples.

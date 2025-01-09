@@ -27,7 +27,7 @@ The ```Detours-main/include``` and ```Detours-main/lib.X86``` directories should
 
 WinFuzz supports Windows 10 and 11.
 
-**Note that Windows' antivirus (Antimalware Service Executable in task manager) will significantly slow down fuzzing and should be disabled.**
+**Note that Windows' real-time antivirus protection (Virus and threat protection settings -> Real-time protection in Windows settings) will significantly slow down fuzzing and should be disabled.**
 
 Currently, only 32-bit builds are supported (inline asm).
 

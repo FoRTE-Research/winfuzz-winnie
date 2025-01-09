@@ -1,0 +1,9 @@
+This directory contains a barebones makefile project that can be used to generate a working harness for an .exe file.
+
+First, find the offset in bytes from the entry point of the binary to the main function of the target binary. 
+This is the MAIN_OFFSET value in dllmain.cpp, which will be added to getModuleEntry() at runtime to find the address the target function was loaded to.
+
+Then, compile:
+nmake TARGET_NAME=binary_name MAIN_OFFSET=0xdeadbeef
+
+The resulting .dll can be used as a fuzzing harness for your binary.
