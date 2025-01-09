@@ -7,8 +7,8 @@ Collaborative repo for [WinFuzz](https://github.com/FoRTE-Research/winfuzz-maste
 You will need Visual Studio 2022 with:
  - Command line build tools
  - .NET framework development tools (for sn.exe, which Detours requires to build)
-Download Microsoft's [Detours](https://github.com/microsoft/Detours) into the root directory of the repo, then compile it:
-```nmake```
+Download Microsoft's [Detours](https://github.com/microsoft/Detours) into the root directory of the repo, then compile it with ```nmake```.
+
 The ```Detours-main/include``` and ```Detours-main/lib.X86``` directories should now be populated, and you can build the main WinFuzz solution.
 
 ## Project structure
@@ -33,7 +33,13 @@ Currently, only 32-bit builds are supported (inline asm).
 
 ## Quick-start
 
-For a complete walkthrough, check out the [guide for fuzzing a toy example program](docs/walkthrough.md).
+After building the fuzzer, refer to the example target setup in [`targets/audiofile_test`](targets/audiofile_test/README).
+
+If you built the fuzzer correctly, you should be able to `cd` to `targets`, then run:
+
+```benchmark_winfuzz.bat audiofile_test 120 100000```
+
+Which will fuzz audiofile_test for 120 seconds, restarting the target process after every 100000 executions. Results will be in the `results/winfuzz/audiofile_test` directory.
 
 ## Usage
 
